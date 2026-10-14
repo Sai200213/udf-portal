@@ -1,0 +1,21 @@
+{
+  "projects": {
+    "default": "hr-portal-unique-delta"
+  },
+  "targets": {
+    "hr-portal-unique-delta": {
+      "hosting": {
+        "main-site": [
+          "hr-portal-unique-delta"
+        ],
+        "admin-portal": [
+          "hr-portal-unique-delta-admin"
+        ],
+        "employee-portal": [
+          "hr-portal-unique-delta-employee"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

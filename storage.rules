@@ -1,0 +1,145 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidUpload() {
+      // Prevent DoS / Billing Exploit by restricting size to 10MB and allowing only images/PDFs
+      return request.resource == null || 
+             (request.resource.size < 10 * 1024 * 1024 && 
+              request.resource.contentType.matches('image/.*|application/pdf'));
+    }
+
+    function isAccountActive(path) {
+      return firestore.exists(path) &&
+        firestore.get(path).data.get('isDisabled', false) == false &&
+        firestore.get(path).data.get('isActive', true) == true;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        isAccountActive(/databases/(default)/documents/users/$(request.auth.uid)) ||
+        isAccountActive(/databases/(default)/documents/staff/$(request.auth.uid)) ||
+        isAccountActive(/databases/(default)/documents/staff_accounts/$(request.auth.uid))
+      );
+    }
+
+    function isEmployeeOwner(employeeId) {
+      return request.auth.uid == employeeId || (
+        firestore.exists(/databases/(default)/documents/employees/$(employeeId)) && (
+          firestore.get(/databases/(default)/documents/employees/$(employeeId)).data.get('linkedUid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/employees/$(employeeId)).data.get('uid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/employees/$(employeeId)).data.get('ownerUid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/employees/$(employeeId)).data.get('portalId', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/employees/$(employeeId)).data.get('employeeId', '') == request.auth.uid
+        )
+      ) || (
+        firestore.exists(/databases/(default)/documents/onboarding_submissions/$(employeeId)) && (
+          firestore.get(/databases/(default)/documents/onboarding_submissions/$(employeeId)).data.get('linkedUid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/onboarding_submissions/$(employeeId)).data.get('uid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/onboarding_submissions/$(employeeId)).data.get('ownerUid', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/onboarding_submissions/$(employeeId)).data.get('portalId', '') == request.auth.uid ||
+          firestore.get(/databases/(default)/documents/onboarding_submissions/$(employeeId)).data.get('employeeId', '') == request.auth.uid
+        )
+      );
+    }
+
+    function isDraftOwner(draftId) {
+      return firestore.exists(/databases/(default)/documents/draft_submissions/$(draftId)) && (
+        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerUid', '') == request.auth.uid ||
+        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('uid', '') == request.auth.uid ||
+        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('linkedUid', '') == request.auth.uid ||
+        (
+          firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerEmail', '') != null &&
+          request.auth.token.email != null &&
+          firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerEmail', '') == request.auth.token.email
+        )
+      );
+    }
+
+    function isOnboardingOwner(submissionId) {
+      return isEmployeeOwner(submissionId) || isDraftOwner(submissionId);
+    }
+
+    // New unified user-based storage folders
+    match /users/{portalUserId} {
+      match /{allPaths=**} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid == portalUserId || 
+          isAdmin() || 
+          isEmployeeOwner(portalUserId) || 
+          isOnboardingOwner(portalUserId)
+        );
+        allow write: if isAuthenticated() && isValidUpload() && (
+          request.auth.uid == portalUserId || 
+          isAdmin() || 
+          isEmployeeOwner(portalUserId) || 
+          isOnboardingOwner(portalUserId)
+        );
+      }
+    }
+
+    // Submission Documents (Joining form uploads)
+    match /onboarding/{submissionId} {
+      match /{allPaths=**} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && isValidUpload();
+      }
+    }
+
+    // Employee Documents (Post-approval organized files) - legacy path
+    match /employees/{employeeId} {
+      match /{allPaths=**} {
+        allow read: if isAdmin() || isEmployeeOwner(employeeId);
+        allow write: if isAdmin();
+      }
+      
+      // Employees can upload their own profile photos
+      match /profile/{allPaths=**} {
+        allow write: if isAuthenticated() && isValidUpload() && (
+          request.auth.uid == employeeId || 
+          isEmployeeOwner(employeeId)
+        );
+        allow read: if true; // Profile photos are generally public or widely accessible
+      }
+
+      // Employees can upload attachments for their own operational requests
+      match /requests/{allPaths=**} {
+        allow read: if isAdmin() || isEmployeeOwner(employeeId);
+        allow write: if isAuthenticated() && isValidUpload() && (
+          request.auth.uid == employeeId || 
+          isEmployeeOwner(employeeId)
+        );
+      }
+
+      // Employees can upload their own joining / correction documents (strictly blocked for any other employee)
+      match /joining/{allPaths=**} {
+        allow read: if isAdmin() || isEmployeeOwner(employeeId);
+        allow write: if isAuthenticated() && isValidUpload() && (
+          isAdmin() || isEmployeeOwner(employeeId)
+        );
+      }
+
+      // 3rd-Party BGV Clearance Certificates (Restricted to Admins and Super Admins)
+      match /bgv/{allPaths=**} {
+        allow read: if isAdmin() || isEmployeeOwner(employeeId);
+        allow write: if isAdmin() && isValidUpload();
+      }
+    }
+
+    // Public Assets (Logos, Banners)
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidUpload();
+    }
+
+    // Default: Deny everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

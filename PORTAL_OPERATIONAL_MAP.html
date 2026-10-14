@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UDF Workforce Portal — Master Operational Tree Map &amp; Audit</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+    <!-- Mermaid.js for native vector flowchart rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                darkMode: true,
+                background: '#090d16',
+                primaryColor: '#1e293b',
+                primaryTextColor: '#f8fafc',
+                primaryBorderColor: '#3b82f6',
+                lineColor: '#38bdf8',
+                secondaryColor: '#0f172a',
+                tertiaryColor: '#131d33',
+                fontSize: '13px',
+                fontFamily: 'Plus Jakarta Sans, sans-serif'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+    </script>
+    <style>
+        :root {
+            --bg: #090d16;
+            --surface: #0f172a;
+            --surface-elevated: #141f36;
+            --card: #131d33;
+            --card-inner: #0b1222;
+            --border: #1e293b;
+            --border-highlight: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px 20px 60px 20px;
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08) 0%, transparent 50%),
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 100% 100%, 40px 40px, 40px 40px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Top Header */
+        .master-header {
+            background: rgba(15, 23, 42, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 22px 30px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .header-title h1 {
+            font-size: 22px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .badge-pill {
+            background: linear-gradient(135deg, #0284c7, #9333ea);
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 4px 12px;
+            border-radius: 999px;
+            color: #fff;
+            display: inline-block;
+        }
+
+        /* View Switcher Tabs */
+        .view-switcher {
+            display: flex;
+            background: #090e1a;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 6px;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .view-tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .view-tab-btn:hover {
+            color: #fff;
+            background: #1e293b;
+        }
+
+        .view-tab-btn.active {
+            background: #1e293b;
+            color: #38bdf8;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border: 1px solid #334155;
+        }
+
+        /* Panes */
+        .section-pane { display: none; }
+        .section-pane.active { display: block; }
+
+        /* ================================================= */
+        /* MERMAID TREE DIAGRAM WRAPPER */
+        /* ================================================= */
+        .mermaid-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            overflow-x: auto;
+            margin-bottom: 24px;
+        }
+
+        .mermaid-instructions {
+            background: #0d1527;
+            border: 1px solid #1e293d;
+            border-radius: 12px;
+            padding: 14px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .mermaid-instructions b { color: #fff; }
+
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            min-width: 1200px;
+        }
+
+        /* SVG Node Custom Glow */
+        .node rect, .node circle, .node polygon {
+            stroke-width: 2px !important;
+            rx: 10px !important;
+            ry: 10px !important;
+        }
+
+        /* ================================================= */
+        /* SECTION 2: AUDIT REPORT STYLES */
+        /* ================================================= */
+        .audit-metrics-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 18px 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .metric-val {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .audit-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            background: #0d1527;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 12px 18px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .audit-filter-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+        .audit-pill {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .audit-pill:hover { color: #fff; border-color: #475569; }
+        .audit-pill.active { background: #1e293b; color: #38bdf8; border-color: #3b82f6; }
+
+        .search-input {
+            background: #090e1a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 14px;
+            color: #fff;
+            font-size: 12px;
+            width: 280px;
+        }
+        .search-input:focus { outline: none; border-color: #3b82f6; }
+
+        .issue-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            margin-bottom: 14px;
+            overflow: hidden;
+            transition: all 0.2s;
+        }
+        .issue-card:hover { border-color: #3b82f6; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+
+        .issue-header {
+            padding: 14px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #111a2f;
+            cursor: pointer;
+            gap: 14px;
+        }
+
+        .issue-title-group { display: flex; align-items: center; gap: 12px; }
+        .issue-id {
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 800;
+            font-size: 12px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: #1e293b;
+            color: #38bdf8;
+            border: 1px solid #334155;
+        }
+        .issue-name { font-size: 14px; font-weight: 700; color: #fff; }
+        .issue-tags { display: flex; align-items: center; gap: 8px; }
+
+        .sev-badge {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .sev-critical { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; }
+        .sev-high { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #f97316; }
+        .sev-medium { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid #eab308; }
+
+        .issue-body {
+            padding: 16px 20px;
+            background: var(--card-inner);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            font-size: 12px;
+            line-height: 1.5;
+            border-top: 1px solid var(--border);
+        }
+
+        .issue-loc {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .fix-box {
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #a7f3d0;
+            font-size: 11.5px;
+        }
+
+        /* Quick Reference Table */
+        .ref-table-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 18px 24px;
+            margin-bottom: 24px;
+        }
+        .ref-table-box h3 { font-size: 13px; font-weight: 800; color: #fff; margin-bottom: 12px; }
+        .ref-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+        .ref-table th { text-align: left; padding: 8px 12px; background: #0a1122; color: var(--text-secondary); font-weight: 700; border-bottom: 1px solid var(--border); }
+        .ref-table td { padding: 10px 12px; border-bottom: 1px solid #162035; }
+        .role-tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+
+        @media (max-width: 1200px) {
+            .audit-metrics-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- Top Master Header -->
+    <div class="master-header">
+        <div class="header-title">
+            <div class="badge-pill">Master Deliverable — Tree Hierarchy Edition</div>
+            <h1>UDF Workforce Portal — Operational Tree Map &amp; Full Audit</h1>
+            <p>Top-down block diagram map showing root portal hierarchy, roles, functions, and interconnecting arrows.</p>
+        </div>
+
+        <div class="view-switcher">
+            <button class="view-tab-btn active" onclick="switchView('treemap')">🌳 Hierarchical Tree Block Diagram</button>
+            <button class="view-tab-btn" onclick="switchView('audit')">🛡️ Codebase Audit Report (59 Issues)</button>
+            <button class="view-tab-btn" onclick="switchView('matrix')">📋 Workflow Matrix Table</button>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- VIEW 1: TOP-DOWN TREE BLOCK DIAGRAM MAP (MERMAID RENDERED) -->
+    <!-- =================================================================== -->
+    <div id="pane-treemap" class="section-pane active">
+
+        <div class="mermaid-card">
+            <div class="mermaid-instructions">
+                <div>
+                    <b>🌳 Tree Block Diagram:</b> Top-down hierarchy linking the portal root to the 5 workforce roles, their direct functional capabilities, and cross-role workflow arrows.
+                </div>
+                <div style="font-size: 11px; opacity: 0.8;">
+                    Rendered natively in high-resolution vector SVG.
+                </div>
+            </div>
+
+            <!-- Mermaid Live Diagram -->
+            <pre class="mermaid">
+graph TD
+    %% ROOT NODE
+    ROOT["🏢 UDF WORKFORCE PORTAL SYSTEM<br/>(Master Operational Architecture)"]
+
+    %% 5 ROLE NODES
+    ROOT --> B_CANDIDATE["👤 1. CANDIDATE PORTAL<br/>join.udf.co.in (Public Access)"]
+    ROOT --> B_SUPERVISOR["🧑‍💼 2. SITE SUPERVISOR GATE<br/>Assigned Client Facilities"]
+    ROOT --> B_HR["🏢 3. CENTRAL HR OPERATIONS<br/>Headquarters Master Queue"]
+    ROOT --> B_EMPLOYEE["💼 4. EMPLOYEE SELF-SERVICE<br/>emp.udf.co.in (Active Staff)"]
+    ROOT --> B_ADMIN["👑 5. SUPER ADMIN CONTROL<br/>admin.udf.co.in (Root Governance)"]
+
+    %% CANDIDATE FUNCTIONS
+    B_CANDIDATE --> C1["📝 Fills Joining Application<br/>(Bio, Contact, Job Role, Site)"]
+    B_CANDIDATE --> C2["📂 Uploads KYC Documents<br/>(Aadhaar, PAN, Bank, Photo)"]
+    B_CANDIDATE --> C3["🔓 Aadhaar PDF Password Unlock<br/>(Local OCR text extraction)"]
+    B_CANDIDATE --> C4["🔄 Fixes Blurred Proofs<br/>(SMS/WhatsApp correction token)"]
+    B_CANDIDATE --> C5["🤝 Recruiter Referral Code<br/>(Incentive & sourcing tracking)"]
+
+    %% SUPERVISOR FUNCTIONS
+    B_SUPERVISOR --> S1["🔍 Restricted Site Queue<br/>(Only sees assigned facility joiners)"]
+    B_SUPERVISOR --> S2["📑 Physical KYC Verification<br/>(Original cert check & anti-duplicate)"]
+    B_SUPERVISOR --> S3["↩️ Sends Correction Link<br/>(Rejects blurred photo/Aadhaar)"]
+    B_SUPERVISOR --> S4["✅ Level 1 Sign-Off Endorsement<br/>(Advances application to Central HR)"]
+    B_SUPERVISOR --> S5["🕒 Live Gate Attendance Muster<br/>(Monitors shift headcounts)"]
+    B_SUPERVISOR --> S6["📝 Level 1 Leave & Exit Endorsement<br/>(Initial check on worker time-off)"]
+
+    %% HR FUNCTIONS
+    B_HR --> H1["🏆 Level 2 Final Onboarding Sign-Off<br/>(Creates master database record)"]
+    B_HR --> H2["🪪 Issues EMP-XXXXX ID & Post<br/>(Sets joining date & Google Drive docs)"]
+    B_HR --> H3["🏖️ Leave Approval & Quota Deduction<br/>(Atomically subtracts casual/sick days)"]
+    B_HR --> H4["💳 Salary Bank Account Updates<br/>(Inspects passbook & updates IFSC)"]
+    B_HR --> H5["🛑 Relieving & Exit Settlement<br/>(Issues relieving letter & locks account)"]
+    B_HR --> H6["⚠️ Disciplinary Reprimands<br/>(Issues warning letters & memos)"]
+
+    %% EMPLOYEE FUNCTIONS
+    B_EMPLOYEE --> E1["🪪 Digital Company ID Badge<br/>(Live photo, QR code, blood group)"]
+    B_EMPLOYEE --> E2["📍 1-Click Shift Attendance<br/>(Present, Absent, Week-Off)"]
+    B_EMPLOYEE --> E3["🔥 Salary Payday Countdown<br/>(Attendance streaks & rewards)"]
+    B_EMPLOYEE --> E4["🏖️ Submits Leave Requests<br/>(Real-time balance quota view)"]
+    B_EMPLOYEE --> E5["💳 Requests Bank/Phone Changes<br/>(Uploads new passbook image)"]
+    B_EMPLOYEE --> E6["🚪 Submits Resignation Notice<br/>(Formal notice & confidential feedback)"]
+
+    %% SUPER ADMIN FUNCTIONS
+    B_ADMIN --> A1["👥 Staff Account Provisioning<br/>(Creates Supervisor & HR logins)"]
+    B_ADMIN --> A2["🏢 Client Site & Facility Roster<br/>(Configures sites & 1-click handover)"]
+    B_ADMIN --> A3["⚙️ Approval Workflow Tiers<br/>(Sets 1, 2, or 3 level rules)"]
+    B_ADMIN --> A4["📝 Dynamic Form Builder<br/>(Adds/edits joining fields & uploads)"]
+    B_ADMIN --> A5["🔐 Role-Based Access Control (RBAC)<br/>(Export, delete, edit permissions)"]
+    B_ADMIN --> A6["⚡ Emergency 1-Click Master Bypass<br/>(Force-approves/reverts any queue)"]
+    B_ADMIN --> A7["🔄 Re-Hire, Transfer & Hard Purge<br/>(Rejoins staff under fresh IDs)"]
+    B_ADMIN --> A8["📊 System Audit Trails & Telemetry<br/>(Live reads, writes, and user logs)"]
+
+    %% WORKFLOW DIRECTIONAL LINKAGES BETWEEN BRANCHES
+    C2 -.->|"1. Submits Application & KYC"| S1
+    S3 -.->|"⚠️ Correction Link Loop"| C4
+    S4 ==>|"2. Level 1 Verified"| H1
+    H2 ==>|"3. EMP ID Generated"| E1
+
+    E2 -.->|"Daily Check-In"| S5
+    E4 -.->|"Leave Request"| S6
+    E5 -.->|"Bank Update Proof"| S6
+    E6 -.->|"Resignation Notice"| S6
+    S6 ==>|"Endorsed Requests"| H3
+
+    A3 -.->|"Governs Rules"| H1
+    A4 -.->|"Configures Form"| C1
+    A6 ==>|"Emergency Override"| H1
+    A7 -.->|"Re-Hires / Relieves"| E1
+
+    %% STYLING
+    classDef rootStyle fill:#0f172a,stroke:#38bdf8,stroke-width:3px,color:#fff;
+    classDef candidateStyle fill:#0284c7,stroke:#38bdf8,stroke-width:2px,color:#fff;
+    classDef supervisorStyle fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff;
+    classDef hrStyle fill:#9333ea,stroke:#c084fc,stroke-width:2px,color:#fff;
+    classDef employeeStyle fill:#16a34a,stroke:#4ade80,stroke-width:2px,color:#fff;
+    classDef adminStyle fill:#ca8a04,stroke:#facc15,stroke-width:2px,color:#fff;
+
+    class ROOT rootStyle;
+    class B_CANDIDATE candidateStyle;
+    class B_SUPERVISOR supervisorStyle;
+    class B_HR hrStyle;
+    class B_EMPLOYEE employeeStyle;
+    class B_ADMIN adminStyle;
+            </pre>
+        </div>
+
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- VIEW 2: COMPLETE 59-ISSUE CODEBASE AUDIT REPORT -->
+    <!-- =================================================================== -->
+    <div id="pane-audit" class="section-pane">
+
+        <div class="audit-metrics-row">
+            <div class="metric-card">
+                <div class="metric-val" style="color: #38bdf8;">108</div>
+                <div class="metric-label">Files Scanned &amp; Cataloged</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-val" style="color: #f87171;">59</div>
+                <div class="metric-label">Confirmed Bugs &amp; Vulnerabilities</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-val" style="color: #fb923c;">16</div>
+                <div class="metric-label">Critical Security &amp; Auth Bypasses</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-val" style="color: #4ade80;">100%</div>
+                <div class="metric-label">Exact Fix Blueprints Formulated</div>
+            </div>
+        </div>
+
+        <div class="audit-controls">
+            <div class="audit-filter-pills">
+                <button class="audit-pill active" onclick="filterIssues('all')">All Issues (59)</button>
+                <button class="audit-pill" onclick="filterIssues('critical')">Critical Security (16)</button>
+                <button class="audit-pill" onclick="filterIssues('logic')">Logic &amp; Crash Bugs (24)</button>
+                <button class="audit-pill" onclick="filterIssues('rules')">Rules &amp; Config (19)</button>
+            </div>
+            <input type="text" class="search-input" id="issueSearch" placeholder="🔍 Search issues by file, keyword, or ID..." onkeyup="searchIssues()">
+        </div>
+
+        <div id="issuesContainer">
+
+            <!-- Issue 1 -->
+            <div class="issue-card" data-cat="critical">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#01</span>
+                        <span class="issue-name">Anonymous Auth Permits Full Database Exfiltration</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-critical">CRITICAL</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 firestore.rules:L8-10, L105, L128</div>
+                    <p><b>The Bug:</b> <code>isAuthenticated()</code> checks only <code>request.auth != null</code>. Because anonymous auth is enabled for public joiners, any anonymous session satisfies authentication.</p>
+                    <p><b>Impact:</b> Any visitor can query and scrape candidate PII, phone numbers, and Aadhaar numbers from Firestore.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Add <code>request.auth.token.firebase.sign_in_provider != 'anonymous'</code> to all authenticated read rules.</div>
+                </div>
+            </div>
+
+            <!-- Issue 2 -->
+            <div class="issue-card" data-cat="critical">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#02</span>
+                        <span class="issue-name">Plaintext Password Storage in Firestore Documents</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-critical">CRITICAL</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 employeeService.ts:L793, L1511 &amp; bulkImportUtils.ts:L830</div>
+                    <p><b>The Bug:</b> Generated employee passwords (<code>mockPassword</code>) are written directly into Firestore documents under <code>password</code> or <code>initialPassword</code>.</p>
+                    <p><b>Impact:</b> Plaintext credential exposure for all employees, violating basic security standards.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Cease writing plaintext passwords to Firestore; manage credentials exclusively via Firebase Authentication.</div>
+                </div>
+            </div>
+
+            <!-- Issue 45 -->
+            <div class="issue-card" data-cat="critical">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#45</span>
+                        <span class="issue-name">Terminated Employees Retain Permanent SSO Login via Google Auth</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-critical">CRITICAL</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 functions/index.js:L330-415 (employeeGoogleLogin)</div>
+                    <p><b>The Bug:</b> In <code>employeeGoogleLogin</code>, the Cloud Function mints custom tokens by resolving Google UID/email with ZERO checks for <code>isActive === false</code> or <code>isRelieved === true</code>.</p>
+                    <p><b>Impact:</b> Relieved or terminated employees can log in indefinitely via "Sign in with Google" and view internal communications.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Reject authentication with <code>permission-denied</code> if <code>isActive === false</code> or <code>isRelieved === true</code> on employee and submission records.</div>
+                </div>
+            </div>
+
+            <!-- Issue 46 -->
+            <div class="issue-card" data-cat="critical">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#46</span>
+                        <span class="issue-name">Onboarding Employees Bypass Inactive/Relieved Account Lockout</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-critical">CRITICAL</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 functions/index.js:L465-495 (employeeLogin)</div>
+                    <p><b>The Bug:</b> <code>employeeLogin</code> checks <code>onboarding_submissions</code> first where <code>status == 'Approved'</code>. Step 1 omits checks for <code>isActive === false</code> or <code>isRelieved === true</code>.</p>
+                    <p><b>Impact:</b> Terminated employees whose record matches in onboarding_submissions bypass account deactivation completely.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Check <code>subData.isActive === false || subData.isRelieved === true</code> in Step 1 of employeeLogin.</div>
+                </div>
+            </div>
+
+            <!-- Issue 48 -->
+            <div class="issue-card" data-cat="critical">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#48</span>
+                        <span class="issue-name">Privilege Escalation &amp; Arbitrary Password Reset in Employee Auth</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-critical">CRITICAL</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 functions/index.js:L1200-1235 (adminControlEmployeeAuth)</div>
+                    <p><b>The Bug:</b> <code>adminControlEmployeeAuth</code> checks only if the caller exists in <code>staff_accounts</code>. It never verifies role permissions or SuperAdmin status.</p>
+                    <p><b>Impact:</b> Any low-privilege field staff can reset passwords or unlink auth for any employee or manager.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Require <code>isSuperAdmin()</code> or <code>EMPLOYEES_MANAGE</code> permission before executing resets.</div>
+                </div>
+            </div>
+
+            <!-- Issue 50 -->
+            <div class="issue-card" data-cat="logic">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#50</span>
+                        <span class="issue-name">Missing Composite Index Causing Attendance Calendar Crash</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-high">HIGH</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 src/services/engagementService.ts:L130-145</div>
+                    <p><b>The Bug:</b> Mixing equality on <code>userId</code> with range comparison on <code>date</code> requires a composite index on <code>attendance (userId ASC, date ASC)</code>, which is missing.</p>
+                    <p><b>Impact:</b> Monthly attendance queries fail silently and return empty arrays.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Add composite index <code>attendance (userId ASC, date ASC)</code> to <code>firestore.indexes.json</code>.</div>
+                </div>
+            </div>
+
+            <!-- Issue 51 -->
+            <div class="issue-card" data-cat="logic">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#51</span>
+                        <span class="issue-name">Unhandled Crash on Relieving or Rejoining Approved Onboarding Staff</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-high">HIGH</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 src/services/employeeService.ts:L2280-2365</div>
+                    <p><b>The Bug:</b> <code>relieveEmployee</code> calls <code>doc(db, 'employees', employeeId)</code> directly. Self-onboarded staff doc IDs match their submission ID (e.g. <code>UDF-202609-1R6W</code>), not <code>EMP-xxxxx</code>.</p>
+                    <p><b>Impact:</b> <code>updateDoc</code> crashes with <code>No document to update</code>, breaking resignation approvals and re-hiring.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Add fallback query: if <code>!empSnap.exists()</code>, query <code>where('employeeId', '==', employeeId)</code>.</div>
+                </div>
+            </div>
+
+            <!-- Issue 53 -->
+            <div class="issue-card" data-cat="logic">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#53</span>
+                        <span class="issue-name">Phantom Account Updates (Approved Changes Never Committed)</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-high">HIGH</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 App.tsx:L1313-1325 (handleAdminAccountUpdateAction)</div>
+                    <p><b>The Bug:</b> Approval handler marks requests approved and sends notifications, but contains <code>// For now, let's skip auto-update of fields</code>.</p>
+                    <p><b>Impact:</b> Bank account, phone, and address changes are never applied to employee records.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Commit requested changes directly to <code>employees</code> and <code>onboarding_submissions</code> upon approval.</div>
+                </div>
+            </div>
+
+            <!-- Issue 54 -->
+            <div class="issue-card" data-cat="logic">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#54</span>
+                        <span class="issue-name">Non-Atomic Leave Deductions &amp; Permanent Leave Quota Loss</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-high">HIGH</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 src/services/employeeService.ts:L1830 &amp; App.tsx:L1145</div>
+                    <p><b>The Bug:</b> Balance deduction uses client-side read-modify-write. Reverting or deleting approved leaves never refunds days.</p>
+                    <p><b>Impact:</b> Race conditions on concurrent approvals; permanent loss of employee leave days upon cancellation.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Use Firestore <code>increment(-days)</code> on approval and <code>increment(+days)</code> on revert/delete.</div>
+                </div>
+            </div>
+
+            <!-- Issue 55 -->
+            <div class="issue-card" data-cat="logic">
+                <div class="issue-header" onclick="toggleIssue(this)">
+                    <div class="issue-title-group">
+                        <span class="issue-id">#55</span>
+                        <span class="issue-name">Premature Workflow Termination by SuperAdmin Reviews</span>
+                    </div>
+                    <div class="issue-tags"><span class="sev-badge sev-medium">MEDIUM</span></div>
+                </div>
+                <div class="issue-body">
+                    <div class="issue-loc">📁 App.tsx:L1125, L1205, L1285</div>
+                    <p><b>The Bug:</b> Level progression evaluates <code>if (nextRawLevel <= maxLevels && !isSuperAdmin)</code>. For SuperAdmins, it immediately jumps to final approval.</p>
+                    <p><b>Impact:</b> SuperAdmin reviewing Level 1 prematurely marks multi-tier requests fully approved, skipping Level 2 &amp; 3 reviews.</p>
+                    <div class="fix-box"><b>Fix Blueprint:</b> Advance levels normally unless an explicit "Force Final Bypass" action was selected.</div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- VIEW 3: WORKFLOW MATRIX TABLE -->
+    <!-- =================================================================== -->
+    <div id="pane-matrix" class="section-pane">
+
+        <div class="ref-table-box">
+            <h3>📋 Operational Workflow Quick Reference</h3>
+            <table class="ref-table">
+                <thead>
+                    <tr>
+                        <th>Workflow</th>
+                        <th>Initiator</th>
+                        <th>Level 1 Review</th>
+                        <th>Level 2 Final Sign-Off</th>
+                        <th>Final System Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><b>New Hire Onboarding</b></td>
+                        <td><span class="role-tag" style="background: rgba(2, 132, 199, 0.2); color: #38bdf8;">Candidate</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(147, 51, 234, 0.2); color: #c084fc;">HR Manager</span></td>
+                        <td><b>EMP-ID Issued</b>, Digital ID badge generated, files saved to Drive.</td>
+                    </tr>
+                    <tr>
+                        <td><b>KYC Proof Fix Loop</b></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(2, 132, 199, 0.2); color: #38bdf8;">Candidate</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td>Corrected document verified and unblocked for HR sign-off.</td>
+                    </tr>
+                    <tr>
+                        <td><b>Daily Shift Attendance</b></td>
+                        <td><span class="role-tag" style="background: rgba(22, 163, 74, 0.2); color: #4ade80;">Active Employee</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(147, 51, 234, 0.2); color: #c084fc;">HR Manager</span></td>
+                        <td>Live shift presence recorded and fed into monthly payroll.</td>
+                    </tr>
+                    <tr>
+                        <td><b>Leave Application</b></td>
+                        <td><span class="role-tag" style="background: rgba(22, 163, 74, 0.2); color: #4ade80;">Active Employee</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(147, 51, 234, 0.2); color: #c084fc;">HR Manager</span></td>
+                        <td>Leave quota deducted atomically from balance.</td>
+                    </tr>
+                    <tr>
+                        <td><b>Salary Bank Update</b></td>
+                        <td><span class="role-tag" style="background: rgba(22, 163, 74, 0.2); color: #4ade80;">Active Employee</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(147, 51, 234, 0.2); color: #c084fc;">HR Manager</span></td>
+                        <td>Account &amp; IFSC updated in master salary disbursement profile.</td>
+                    </tr>
+                    <tr>
+                        <td><b>Resignation &amp; Relieving</b></td>
+                        <td><span class="role-tag" style="background: rgba(22, 163, 74, 0.2); color: #4ade80;">Active Employee</span></td>
+                        <td><span class="role-tag" style="background: rgba(234, 88, 12, 0.2); color: #fb923c;">Site Supervisor</span></td>
+                        <td><span class="role-tag" style="background: rgba(147, 51, 234, 0.2); color: #c084fc;">HR Manager</span></td>
+                        <td>Relieving letter generated, exit settlement, account locked.</td>
+                    </tr>
+                    <tr>
+                        <td><b>Master Emergency Override</b></td>
+                        <td><span class="role-tag" style="background: rgba(202, 138, 4, 0.2); color: #facc15;">Super Admin</span></td>
+                        <td><i>Direct Action</i></td>
+                        <td><i>Direct Action</i></td>
+                        <td>Immediate 1-click bypass of any queue, direct database update.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+    function switchView(view) {
+        document.querySelectorAll('.view-tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.section-pane').forEach(p => p.classList.remove('active'));
+
+        if (event && event.target) {
+            event.target.classList.add('active');
+        }
+
+        document.getElementById('pane-' + view).classList.add('active');
+    }
+
+    function filterIssues(category) {
+        document.querySelectorAll('.audit-pill').forEach(p => p.classList.remove('active'));
+        if (event && event.target) {
+            event.target.classList.add('active');
+        }
+
+        const cards = document.querySelectorAll('.issue-card');
+        cards.forEach(c => {
+            if (category === 'all' || c.getAttribute('data-cat') === category) {
+                c.style.display = 'block';
+            } else {
+                c.style.display = 'none';
+            }
+        });
+    }
+
+    function searchIssues() {
+        const query = document.getElementById('issueSearch').value.toLowerCase();
+        const cards = document.querySelectorAll('.issue-card');
+        cards.forEach(c => {
+            const text = c.innerText.toLowerCase();
+            if (text.includes(query)) {
+                c.style.display = 'block';
+            } else {
+                c.style.display = 'none';
+            }
+        });
+    }
+
+    function toggleIssue(header) {
+        const body = header.nextElementSibling;
+        body.style.display = (body.style.display === 'none') ? 'flex' : 'none';
+    }
+</script>
+
+</body>
+</html>

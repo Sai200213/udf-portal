@@ -1,0 +1,21 @@
+# UDF Online HR Portal - Robots.txt
+# https://udfonline.in
+
+User-agent: *
+Allow: /
+Allow: /blogs
+Allow: /business
+Allow: /careers
+Allow: /contact
+Allow: /join
+Allow: /privacy-policy
+Allow: /terms-of-service
+
+# Block authenticated and utility internal pages (not indexable)
+Disallow: /admin/
+Disallow: /employee/
+Disallow: /claim-profile
+Disallow: /correct-details
+
+# Sitemap
+Sitemap: https://udfonline.in/sitemap.xml

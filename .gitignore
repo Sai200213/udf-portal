@@ -1,0 +1,49 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+functions/node_modules
+dist
+dist-admin
+dist-employee
+dist-main
+dist-public
+dist-ssr
+.firebase
+brain/
+scratch/
+scratch_*
+light house scan/
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+.vercel
+
+# Security credentials
+serviceAccountKey.json
+
+# Environment variables (keep .env.example as template)
+.env*
+!.env.example
+
+# Backup directories
+Antigravity_Backup/
+RESTORED_FEB_14/
+STABLE_RESTORED/
+backups/

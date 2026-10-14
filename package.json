@@ -1,0 +1,58 @@
+{
+  "name": "hr-portal-udf",
+  "private": true,
+  "version": "1.0.0-rc1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:public": "cross-env VITE_APP_TARGET=public vite",
+    "dev:admin": "cross-env VITE_APP_TARGET=admin vite",
+    "dev:employee": "cross-env VITE_APP_TARGET=employee vite",
+    "build": "vite build",
+    "build:web:public": "cross-env VITE_APP_TARGET=public vite build && node scripts/generateStaticPages.js",
+    "build:web:admin": "cross-env VITE_APP_TARGET=admin vite build",
+    "build:web:employee": "cross-env VITE_APP_TARGET=employee vite build",
+    "build:admin": "cross-env VITE_APP_TARGET=admin npm run build && cd mobile-admin && npx cap copy",
+    "build:employee": "cross-env VITE_APP_TARGET=employee npm run build && cd mobile-employee && npx cap copy",
+    "sync:admin": "cross-env VITE_APP_TARGET=admin npm run build && cd mobile-admin && npx cap sync",
+    "sync:employee": "cross-env VITE_APP_TARGET=employee npm run build && cd mobile-employee && npx cap sync",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+    "@google/genai": "^1.26.0",
+    "firebase": "^12.7.0",
+    "lucide-react": "^0.511.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.5.207",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-hot-toast": "^2.6.0",
+    "react-image-crop": "^11.0.10",
+    "react-router-dom": "^7.15.1",
+    "uuid": "^11.1.1",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.27",
+    "cross-env": "^10.1.0",
+    "postcss": "^8.5.8",
+    "tailwindcss": "3.4",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-pwa": "^1.2.0"
+  },
+  "overrides": {
+    "protobufjs": "^7.6.3",
+    "brace-expansion": "^5.0.6",
+    "@xmldom/xmldom": "^0.8.13",
+    "ws": "^8.21.0",
+    "@grpc/grpc-js": "^1.12.7",
+    "tar": "^7.5.16"
+  }
+}

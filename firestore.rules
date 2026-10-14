@@ -1,0 +1,519 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ───────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Registered user (non-anonymous) for internal employee collections
+    function isRegisteredUser() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Account active helper (strictly rejects disabled or deactivated accounts)
+    function isAccountActive(path) {
+      return exists(path) && 
+        get(path).data.get('isDisabled', false) != true && 
+        get(path).data.get('isActive', true) != false;
+    }
+
+    // Admin = Active user in 'users', 'staff', or 'staff_accounts'
+    function isAdmin() {
+      return isRegisteredUser() && (
+        isAccountActive(/databases/$(database)/documents/users/$(request.auth.uid)) ||
+        isAccountActive(/databases/$(database)/documents/staff/$(request.auth.uid)) ||
+        isAccountActive(/databases/$(database)/documents/staff_accounts/$(request.auth.uid))
+      );
+    }
+    
+    // SuperAdmin = Active user in 'users', 'staff_accounts', or 'staff' with the super-admin role
+    function isSuperAdmin() {
+      return isRegisteredUser() && (
+        (isAccountActive(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleId == 'role-super-admin') ||
+        (isAccountActive(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.roleId == 'role-super-admin') ||
+        (isAccountActive(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.roleId == 'role-super-admin')
+      );
+    }
+
+    // Helper to get user's role ID from admin, staff_accounts, or legacy staff collection
+    function getUserRoleId() {
+      return (isRegisteredUser() && isAccountActive(/databases/$(database)/documents/users/$(request.auth.uid)))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.roleId
+        : (isRegisteredUser() && isAccountActive(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)))
+          ? get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.roleId
+          : (isRegisteredUser() && isAccountActive(/databases/$(database)/documents/staff/$(request.auth.uid)))
+            ? get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.roleId
+            : 'none';
+    }
+
+    // Helper to get user's custom permissions override map
+    function getUserPermissionOverrides() {
+      return (request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid)))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissionOverrides', {})
+        : (request.auth != null && exists(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)))
+          ? get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.get('permissionOverrides', {})
+          : (request.auth != null && exists(/databases/$(database)/documents/staff/$(request.auth.uid)))
+            ? get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('permissionOverrides', {})
+            : {};
+    }
+
+    // NEW: Dynamic permission check against the 'roles' collection and user-specific overrides
+    function hasPermission(permission) {
+      let roleId = getUserRoleId();
+      let overrides = getUserPermissionOverrides();
+      return isAuthenticated() && (
+        roleId == 'role-super-admin' || 
+        (overrides.get(permission, null) == true) ||
+        (overrides.get(permission, null) != false &&
+         exists(/databases/$(database)/documents/roles/$(roleId)) && 
+         get(/databases/$(database)/documents/roles/$(roleId)).data.get('isDisabled', false) != true &&
+         get(/databases/$(database)/documents/roles/$(roleId)).data.permissions.hasAny([permission]))
+      );
+    }
+
+    function isOwnerOfPortalId(portalId) {
+      return portalId != null && (
+        portalId == request.auth.uid ||
+        (request.auth.token.get('employeeId', '') != '' && portalId == request.auth.token.employeeId) ||
+        (
+          exists(/databases/$(database)/documents/employees/$(portalId)) && (
+            get(/databases/$(database)/documents/employees/$(portalId)).data.get('linkedUid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/employees/$(portalId)).data.get('uid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/employees/$(portalId)).data.get('ownerUid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/employees/$(portalId)).data.get('portalId', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/employees/$(portalId)).data.get('employeeId', '') == request.auth.uid
+          )
+        ) ||
+        (
+          exists(/databases/$(database)/documents/onboarding_submissions/$(portalId)) && (
+            get(/databases/$(database)/documents/onboarding_submissions/$(portalId)).data.get('linkedUid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/onboarding_submissions/$(portalId)).data.get('uid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/onboarding_submissions/$(portalId)).data.get('ownerUid', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/onboarding_submissions/$(portalId)).data.get('portalId', '') == request.auth.uid ||
+            get(/databases/$(database)/documents/onboarding_submissions/$(portalId)).data.get('employeeId', '') == request.auth.uid
+          )
+        )
+      );
+    }
+
+
+    function getStaffSitesManaged() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('sitesManaged', [])
+        : exists(/databases/$(database)/documents/staff_accounts/$(request.auth.uid))
+          ? get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.get('sitesManaged', [])
+          : exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+            ? get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('sitesManaged', [])
+            : [];
+    }
+
+    function canStaffViewSite(siteId) {
+      return isSuperAdmin() || 
+             hasPermission('EMPLOYEES_VIEW_SCOPE_ALL') || 
+             hasPermission('SUBMISSIONS_VIEW_SCOPE_ALL') ||
+             hasPermission('MANAGE_ALL_SITES') ||
+             (siteId != null && siteId != '' && getStaffSitesManaged().hasAny([siteId]));
+    }
+
+    function isSelfEmployee(userId, empData) {
+      return isAuthenticated() && (
+        request.auth.uid == userId ||
+        empData.get('uid', '') == request.auth.uid ||
+        empData.get('linkedUid', '') == request.auth.uid ||
+        empData.get('portalId', '') == request.auth.uid
+      );
+    }
+
+    function isSelfSubmission(subData) {
+      return isAuthenticated() && (
+        subData.get('uid', '') == request.auth.uid ||
+        subData.get('linkedUid', '') == request.auth.uid ||
+        subData.get('ownerUid', '') == request.auth.uid ||
+        (request.auth.token.get('email', '') != '' && (
+          subData.get('linkedGoogleEmail', '') == request.auth.token.email ||
+          subData.get('email', '') == request.auth.token.email
+        ))
+      );
+    }
+
+    function hasActiveCorrectionToken(docData) {
+      return docData.activeCorrectionToken != null &&
+        exists(/databases/$(database)/documents/correction_requests/$(docData.activeCorrectionToken)) &&
+        get(/databases/$(database)/documents/correction_requests/$(docData.activeCorrectionToken)).data.status == 'pending' &&
+        get(/databases/$(database)/documents/correction_requests/$(docData.activeCorrectionToken)).data.expiresAt > request.time;
+    }
+
+    // ─── Settings / Metadata ────────────────────────────────────────────────
+    // Form structure, login labels, and public stats are public (needed for onboarding + landing page)
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM') ||
+        (docId == 'sites' && (hasPermission('SITES_MANAGE') || hasPermission('SITES_EDIT_INFO')));
+    }
+
+    // ─── Admin / Super-Admin Accounts ───────────────────────────────────────
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Staff Accounts ─────────────────────────────────────────────────────
+    match /staff_accounts/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /staff/{userId} {
+      allow get: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Employee Records ────────────────────────────────────────────────────
+    match /employees/{userId} {
+      allow get: if resource == null ||
+                    isSelfEmployee(userId, resource.data) || 
+                    hasActiveCorrectionToken(resource.data) ||
+                    (isAdmin() && canStaffViewSite(resource.data.get('currentSiteId', resource.data.get('siteId', ''))));
+      allow list: if isAdmin() || (isAuthenticated() && (
+        resource.data.get('uid', '') == request.auth.uid || 
+        resource.data.get('linkedUid', '') == request.auth.uid
+      ));
+      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() || hasActiveCorrectionToken(resource.data)
+        || (isAuthenticated() && (request.auth.uid == userId || resource.data.get('uid', '') == request.auth.uid) && (
+            (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileStatus', 'lastUpdated', 'needsProfileCompletion', 'profilePhotoURL']) &&
+              (request.resource.data.profileStatus == 'waiting_for_admin' || request.resource.data.profileStatus == 'approved' || request.resource.data.profilePhotoURL != null)
+            ) || (
+              resource.data.get('needsProfileCompletion', false) == true &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileStatus', 'lastUpdated', 'needsProfileCompletion', 'profilePhotoURL', 'profileData', 'data'])
+            )
+        )) || (
+            isAuthenticated() &&
+            (resource.data.profileStatus == 'needs_completion' || resource.data.profileStatus == 'waiting_for_admin' || resource.data.get('needsProfileCompletion', false) == true) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid']) &&
+            request.resource.data.uid == request.auth.uid &&
+            (resource.data.get('linkedGoogleEmail', '') == request.auth.token.email || resource.data.get('email', '') == request.auth.token.email || resource.data.get('username', '') == request.auth.token.email)
+        );
+      allow create, delete: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin();
+    }
+
+    // ─── Onboarding Submissions ──────────────────────────────────────────────
+    match /onboarding_submissions/{id} {
+      allow get: if resource == null ||
+                    isSelfSubmission(resource.data) || 
+                    hasActiveCorrectionToken(resource.data) ||
+                    (isAdmin() && canStaffViewSite(resource.data.get('siteId', '')));
+      allow list: if isAdmin() || (isAuthenticated() && (
+        resource.data.get('linkedUid', '') == request.auth.uid ||
+        resource.data.get('uid', '') == request.auth.uid ||
+        resource.data.get('ownerUid', '') == request.auth.uid ||
+        (request.auth.token.get('email', '') != '' && (
+          resource.data.get('linkedGoogleEmail', '') == request.auth.token.email ||
+          resource.data.get('email', '') == request.auth.token.email
+        ))
+      ));
+      allow create: if isAuthenticated();
+      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() || hasActiveCorrectionToken(resource.data)
+        || (isAuthenticated() && (resource.id == request.auth.uid || resource.data.uid == request.auth.uid || resource.data.linkedUid == request.auth.uid));
+      allow delete: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin(); 
+    }
+
+    // ─── Draft Submissions ───────────────────────────────────────────────────
+    match /draft_submissions/{id} {
+      // Direct GET by draft recovery code is allowed (the code itself acts as the authorization token)
+      allow get: if true;
+      // Listing or browsing drafts is strictly restricted to Admins or the draft owner (by UID or email)
+      allow list: if isAdmin() || (isAuthenticated() && (resource.data.ownerUid == request.auth.uid || (resource.data.ownerEmail != null && resource.data.ownerEmail == request.auth.token.email)));
+      // Anyone authenticated can create or update their draft by recovery code ID
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      // Deletions allowed for admin or the draft owner
+      allow delete: if isAdmin() || isAuthenticated();
+    }
+
+    // ─── Leave Requests ──────────────────────────────────────────────────────
+    match /leave_requests/{id} {
+      allow read: if isAdmin() || 
+                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+      allow create: if isRegisteredUser() && (
+        isAdmin() || (
+          request.resource.data.status == 'Pending' &&
+          request.resource.data.get('currentLevel', 1) == 1
+        )
+      );
+      allow update: if (
+        isRegisteredUser() &&
+        resource.data.status == 'Pending' &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'currentLevel', 'approvedBy', 'rejectedBy'])
+      ) || (
+        isSuperAdmin()
+      ) || (
+        request.resource.data.status == 'Approved' && hasPermission('LEAVES_APPROVE')
+      ) || (
+        request.resource.data.status == 'Rejected' && (hasPermission('LEAVES_REJECT') || hasPermission('LEAVES_APPROVE'))
+      ) || (
+        (request.resource.data.currentLevel < resource.data.currentLevel || (resource.data.status != 'Pending' && request.resource.data.status == 'Pending')) && 
+        (hasPermission('LEAVES_REVERT_DECISION') || hasPermission('LEAVES_APPROVE'))
+      ) || (
+        hasPermission('LEAVES_APPROVE')
+      );
+      allow delete: if hasPermission('LEAVES_DELETE') || hasPermission('LEAVES_APPROVE') || isSuperAdmin();
+    }
+
+    // ─── Account Update Requests ─────────────────────────────────────────────
+    match /account_updates/{id} {
+      allow read: if isAdmin() || 
+                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+      allow create: if isRegisteredUser() && (
+        isAdmin() || (
+          request.resource.data.status == 'Pending' &&
+          request.resource.data.get('currentLevel', 1) == 1
+        )
+      );
+      allow update: if (
+        isRegisteredUser() &&
+        resource.data.status == 'Pending' &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'currentLevel', 'approvedBy', 'rejectedBy'])
+      ) || (
+        isSuperAdmin()
+      ) || (
+        request.resource.data.status == 'Approved' && hasPermission('ACCOUNT_UPDATES_APPROVE')
+      ) || (
+        request.resource.data.status == 'Rejected' && (hasPermission('ACCOUNT_UPDATES_REJECT') || hasPermission('ACCOUNT_UPDATES_APPROVE'))
+      ) || (
+        (request.resource.data.currentLevel < resource.data.currentLevel || (resource.data.status != 'Pending' && request.resource.data.status == 'Pending')) && 
+        (hasPermission('ACCOUNT_UPDATES_REVERT_DECISION') || hasPermission('ACCOUNT_UPDATES_APPROVE'))
+      ) || (
+        hasPermission('ACCOUNT_UPDATES_APPROVE')
+      );
+      allow delete: if hasPermission('ACCOUNT_UPDATES_DELETE') || hasPermission('ACCOUNT_UPDATES_APPROVE') || isSuperAdmin();
+    }
+
+    // ─── Resignations ────────────────────────────────────────────────────────
+    match /resignations/{id} {
+      allow read: if isAdmin() || 
+                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+      allow create: if isRegisteredUser() && (
+        isAdmin() || (
+          request.resource.data.status == 'Pending' &&
+          request.resource.data.get('currentLevel', 1) == 1
+        )
+      );
+      allow update: if (
+        isRegisteredUser() &&
+        resource.data.status == 'Pending' &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'currentLevel', 'approvedBy', 'rejectedBy'])
+      ) || (
+        isSuperAdmin()
+      ) || (
+        request.resource.data.status == 'Approved' && (hasPermission('RESIGNATIONS_APPROVE') || isAdmin())
+      ) || (
+        request.resource.data.status == 'Rejected' && (hasPermission('RESIGNATIONS_REJECT') || hasPermission('RESIGNATIONS_APPROVE') || isAdmin())
+      ) || (
+        (request.resource.data.currentLevel < resource.data.currentLevel || (resource.data.status != 'Pending' && request.resource.data.status == 'Pending')) && 
+        (hasPermission('RESIGNATIONS_REVERT_DECISION') || hasPermission('RESIGNATIONS_APPROVE') || isAdmin())
+      ) || (
+        hasPermission('RESIGNATIONS_APPROVE') || isAdmin()
+      );
+      allow delete: if hasPermission('RESIGNATIONS_DELETE') || hasPermission('RESIGNATIONS_APPROVE') || isSuperAdmin();
+    }
+
+    // ─── Disciplinary Actions ────────────────────────────────────────────────
+    match /disciplinary_actions/{id} {
+      allow read: if isAdmin() || 
+                     (isAuthenticated() && (resource.data.employeeId == request.auth.uid || resource.data.get('targetUserId', '') == request.auth.uid));
+      allow write: if hasPermission('DISCIPLINE_MANAGE') || isSuperAdmin();
+    }
+
+    // ─── Legacy Employee Imports ─────────────────────────────────────────────
+    match /legacy_employee_imports/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ─── Notifications ───────────────────────────────────────────────────────
+    match /notifications/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && (
+        resource.data.targetUserId == request.auth.uid ||
+        (request.auth.token.get('employeeId', '') != '' && resource.data.targetUserId == request.auth.token.employeeId) ||
+        isOwnerOfPortalId(resource.data.targetUserId) ||
+        (isAdmin() && resource.data.targetUserId in ['all_admins', 'admin'])
+      ));
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin() || (isAuthenticated() && (
+        resource.data.targetUserId == request.auth.uid ||
+        (request.auth.token.get('employeeId', '') != '' && resource.data.targetUserId == request.auth.token.employeeId) ||
+        isOwnerOfPortalId(resource.data.targetUserId)
+      ));
+    }
+
+    // ─── Audit Logs ───────────────────────────────────────────────────────────
+    match /audit_logs/{id} {
+      allow read: if hasPermission('VIEW_AUDIT_LOGS') || (isAuthenticated() && resource.data.actorId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // ─── Roles ───────────────────────────────────────────────────────────────
+    match /roles/{roleId} {
+      allow read: if isRegisteredUser();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Leave Balances ──────────────────────────────────────────────────────
+    match /leave_balances/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && (id == request.auth.uid || resource.data.employeeId == request.auth.uid));
+      allow write: if isAdmin();
+    }
+
+    // ─── Leave Policy ────────────────────────────────────────────────────────
+    match /leave_policy/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Portal Config ───────────────────────────────────────────────────────
+    match /portal_config/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Editable Fields Config ──────────────────────────────────────────────
+    match /editable_fields/{id} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
+    // ─── Vacancies ───────────────────────────────────────────────────────────
+    match /vacancies/{id} {
+      allow read: if true; // Public — displayed on blog/careers page
+      allow write: if isSuperAdmin() || hasPermission('VACANCIES_MANAGE');
+    }
+
+    // ─── Background Verification (BGV) Records ──────────────────────────────
+    match /bgv_records/{id} {
+      allow read: if isSuperAdmin() || 
+                     hasPermission('BGV_VIEW') || 
+                     hasPermission('BGV_VIEW_DOSSIER') || 
+                     hasPermission('BGV_MANAGE') || 
+                     hasPermission('BGV_VENDOR') || 
+                     (isAuthenticated() && (
+                       resource.data.get('vendorId', '') == request.auth.uid ||
+                       resource.data.get('vendorName', '') == request.auth.token.get('email', '')
+                     ));
+      allow create, update: if isSuperAdmin() || 
+                               hasPermission('BGV_MANAGE') || 
+                               hasPermission('BGV_DISPATCH_VENDOR') || 
+                               hasPermission('BGV_UPLOAD_CERTIFICATE') || 
+                               hasPermission('BGV_APPROVE_REJECT') || 
+                               hasPermission('BGV_VENDOR') || 
+                               (isAuthenticated() && resource.data.get('vendorId', '') == request.auth.uid);
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─── Internal Rate-Limiting Collection ───────────────────────────────────
+    // No client-side access at all — managed solely by Cloud Functions
+    match /_auth_attempts/{id} {
+      allow read, write: if false;
+    }
+
+    // ─── Data Correction Requests ───────────────────────────────────────────
+    match /correction_requests/{id} {
+      // Correction token holders need GET to load the form (token acts as credentials)
+      allow get: if true;
+      allow list: if isAdmin() || hasPermission('SUBMISSIONS_APPROVE');
+      allow create, delete: if isAdmin() || hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin();
+      // Admins can update freely; clients can only mark a pending token as completed (using the secure token ID as auth)
+      allow update: if isAdmin() || hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin()
+        || (resource.data.status == 'pending' && 
+            request.resource.data.status == 'completed' &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'completedAt']));
+    }
+
+    // ─── Referral Invites ───────────────────────────────────────────────────
+    match /referral_invites/{id} {
+      allow get: if true; // Publicly readable for validation/checks on form load
+      allow create: if isSuperAdmin() || hasPermission('INVITES_CREATE');
+      allow update: if (
+        // Allow anyone to update clicks, started, starts, joined counts
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clicks', 'started', 'starts', 'joined'])
+      ) || (
+        // Admin override
+        isSuperAdmin() || hasPermission('INVITES_MANAGE')
+      ) || (
+        // Creator-specific checks
+        isAuthenticated() && resource.data.createdBy == request.auth.uid && (
+          // Creator wants to edit
+          (request.resource.data.status == resource.data.status && hasPermission('INVITES_EDIT')) ||
+          // Creator wants to reactivate
+          (resource.data.status != 'Active' && request.resource.data.status == 'Active' && hasPermission('INVITES_REACTIVATE')) ||
+          // Creator wants to revoke
+          (request.resource.data.status == 'Revoked' && hasPermission('INVITES_DELETE'))
+        )
+      );
+      allow delete: if isSuperAdmin();
+      allow list: if isSuperAdmin() || (isAuthenticated() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // ─── Engagement, Attendance, and Complaints ──────────────────────────────
+    match /user_engagement/{id} {
+      allow read: if isAuthenticated() && (isOwnerOfPortalId(id) || isAdmin());
+      // Allow initializing streak with initial points <= 50, referralCount strictly 0
+      allow create: if isAuthenticated() && (isOwnerOfPortalId(id) || isAdmin()) && 
+                    request.resource.data.get('points', 0) <= 50 && 
+                    request.resource.data.get('referralCount', 0) == 0;
+      // Allow updating streak: points can only increment by at most 50 per action, referralCount cannot be modified by client
+      allow update: if isAuthenticated() && (isOwnerOfPortalId(id) || isAdmin()) && (
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['referralCount']) &&
+        request.resource.data.get('points', 0) <= resource.data.get('points', 0) + 50
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /attendance/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && isOwnerOfPortalId(resource.data.userId));
+      allow create: if isAuthenticated() && isOwnerOfPortalId(request.resource.data.userId);
+      allow update: if isAdmin() || (isAuthenticated() && isOwnerOfPortalId(resource.data.userId) && isOwnerOfPortalId(request.resource.data.userId));
+      allow delete: if isAdmin();
+    }
+
+    match /complaints/{id} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && isOwnerOfPortalId(request.resource.data.userId);
+      allow update, delete: if isAdmin();
+    }
+
+    match /reward_redemptions/{id} {
+      allow read: if isAdmin() || (isAuthenticated() && isOwnerOfPortalId(resource.data.userId));
+      allow create: if isAuthenticated() && isOwnerOfPortalId(request.resource.data.userId);
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Blog Posts ──────────────────────────────────────────────────────────
+    match /blog_posts/{id} {
+      allow read: if resource.data.get('isPrivate', false) != true || isAuthenticated();
+      allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM');
+    }
+
+    // ─── Central Recycle Bin (Soft Delete & Universal Undo Vault - Super Admin Only) ───────────
+    match /recycle_bin/{id} {
+      allow read, update, delete: if isSuperAdmin();
+      allow create: if isSuperAdmin() || isAdmin();
+    }
+
+    // ─── Safety Quizzes ──────────────────────────────────────────────────────
+    match /safety_quizzes/{id} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || hasPermission('GAMIFICATION_MANAGE');
+    }
+  }
+}

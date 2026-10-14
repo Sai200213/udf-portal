@@ -1,0 +1,444 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Additional custom styles for HR Portal */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Focus styles */
+*:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Print styles */
+@media print {
+  body {
+    background: white !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ============================================
+   MOBILE NATIVE APP STYLES
+   Scoped under .native-app class (applied by Capacitor)
+   ============================================ */
+
+.native-app {
+  /* Prevent text selection like native apps */
+  -webkit-user-select: none;
+  user-select: none;
+  
+  /* Prevent pull-to-refresh bounce */
+  overscroll-behavior: none;
+  
+  /* Prevent tap highlight */
+  -webkit-tap-highlight-color: transparent;
+  
+  /* Prevent long-press context menu */
+  -webkit-touch-callout: none;
+  
+  /* Only vertical scroll */
+  touch-action: pan-y;
+  
+  /* Status bar safe area */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Allow text selection in input fields */
+.native-app input,
+.native-app textarea,
+.native-app [contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Hide scrollbars for native feel */
+.native-app ::-webkit-scrollbar {
+  display: none;
+}
+.native-app * {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* --- Full-bleed layouts --- */
+.native-app .min-h-screen {
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport for mobile */
+}
+
+/* --- Larger touch targets --- */
+.native-app button,
+.native-app a,
+.native-app [role="button"] {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.native-app input,
+.native-app select,
+.native-app textarea {
+  font-size: 16px !important; /* Prevents iOS zoom on focus */
+  min-height: 48px;
+}
+
+/* --- Remove desktop max-width constraints --- */
+.native-app .max-w-md,
+.native-app .max-w-lg,
+.native-app .max-w-xl,
+.native-app .max-w-2xl,
+.native-app .max-w-4xl,
+.native-app .max-w-6xl,
+.native-app .max-w-7xl {
+  max-width: 100% !important;
+}
+
+/* --- Mobile card styling --- */
+.native-app .rounded-xl,
+.native-app .rounded-2xl {
+  border-radius: 16px;
+}
+
+/* --- Hide web-only elements in native --- */
+.native-app .web-only,
+.native-app [data-web-only] {
+  display: none !important;
+}
+
+/* ============================================
+   NATIVE LOGIN PAGE STYLES
+   ============================================ */
+
+.native-app .native-login-page {
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  align-items: stretch !important;
+  padding: 0 !important;
+  background: #ffffff !important;
+}
+
+.native-app .native-login-card {
+  max-width: 100% !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 24px 20px !important;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ============================================
+   NATIVE BOTTOM TAB BAR (Employee Dashboard)
+   ============================================ */
+
+.native-app .native-bottom-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 4px 0;
+  padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+  z-index: 1000;
+  box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.06);
+}
+
+.native-app .native-bottom-tabs button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: all 0.15s ease;
+  min-width: 56px;
+  min-height: 48px;
+  position: relative;
+}
+
+.native-app .native-bottom-tabs button.active {
+  color: #059669;
+}
+
+.native-app .native-bottom-tabs button.active::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 3px;
+  background: #059669;
+  border-radius: 3px;
+}
+
+.native-app .native-bottom-tabs button svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* ============================================
+   NATIVE TOP HEADER BAR
+   ============================================ */
+
+.native-app .native-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #ffffff;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.04);
+}
+
+.native-app .native-top-bar h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  flex: 1;
+  text-align: center;
+}
+
+.native-app .native-top-bar .top-bar-left,
+.native-app .native-top-bar .top-bar-right {
+  min-width: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.native-app .native-top-bar .top-bar-right {
+  justify-content: flex-end;
+}
+
+/* ============================================
+   NATIVE CONTENT AREA ADJUSTMENTS
+   ============================================ */
+
+/* Add padding for bottom tabs */
+.native-app .native-content-with-tabs {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Compact content padding for native */
+.native-app .native-main-content {
+  padding: 12px 16px !important;
+}
+
+/* --- Hide breadcrumbs on native --- */
+.native-app .native-hide-breadcrumbs nav,
+.native-app .native-hide-breadcrumbs .breadcrumb-container {
+  display: none !important;
+}
+
+/* ============================================
+   NATIVE "MORE" SHEET (Employee)
+   ============================================ */
+
+.native-app .native-more-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2000;
+  animation: fadeIn 0.2s ease;
+}
+
+.native-app .native-more-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  z-index: 2001;
+  padding: 8px 0 0;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  animation: slideUp 0.25s ease-out;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.native-app .native-more-sheet .sheet-handle {
+  width: 40px;
+  height: 4px;
+  background: #d1d5db;
+  border-radius: 4px;
+  margin: 0 auto 12px;
+}
+
+.native-app .native-more-sheet .sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #374151;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  min-height: 48px;
+}
+
+.native-app .native-more-sheet .sheet-item:active {
+  background: #f3f4f6;
+}
+
+.native-app .native-more-sheet .sheet-item.danger {
+  color: #dc2626;
+}
+
+.native-app .native-more-sheet .sheet-divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin: 4px 0;
+}
+
+/* ============================================
+   LOGIN PAGE MOBILE OPTIMIZATIONS
+   ============================================ */
+
+.native-app .bg-gray-50 {
+  background: #ffffff !important;
+}
+
+.native-app .py-12 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+/* Remove all shadows on native for flat design */
+.native-app .shadow-lg,
+.native-app .shadow-xl {
+  box-shadow: none;
+}
+
+/* ============================================
+   PAGE TRANSITIONS
+   ============================================ */
+
+.native-app .page-enter {
+  animation: slideInRight 0.25s ease-out;
+}
+
+.native-app .page-exit {
+  animation: slideOutLeft 0.2s ease-in;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutLeft {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ============================================
+   ANDROID SPECIFIC
+   ============================================ */
+
+.native-android button:active {
+  opacity: 0.7;
+  transform: scale(0.97);
+}
+
+/* ============================================
+   iOS SPECIFIC
+   ============================================ */
+
+.native-ios .native-top-bar {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
+/* Premium Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+/* Firefox support */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}

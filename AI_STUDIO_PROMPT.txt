@@ -1,0 +1,48 @@
+You are an expert full-stack developer. I have an existing **HR Portal** application built with **React (Vite) + TypeScript + Tailwind CSS**.
+
+I have recently integrated **Firebase** to replace the local mock storage.
+
+Here is the current state of the project:
+
+### 1. Technology Stack
+- **Frontend**: React 19, TypeScript, Tailwind CSS, Lucide React Icons.
+- **Backend**: Firebase Authentication, Firestore Database, Firebase Storage.
+- **Backend Logic**: Firebase Cloud Functions (Node.js) for admin operations.
+- **Build Tool**: Vite.
+
+### 2. Core Architecture
+The app is a Single Page Application (SPA) where `App.tsx` handles the primary routing based on User Roles (Admin vs Employee).
+
+**Services Layer (`src/services/`)**:
+- `authService.ts`: Handles Login/Logout using Firebase Auth. Resolves user roles from Firestore `staff` collection.
+- `employeeService.ts`: Manages employee onboarding submissions (`submissions` collection) and profiles (`employees` collection).
+- `leaveService.ts`: Manages leave requests (`leaveRequests` collection).
+- `staffService.ts`: Connects to Cloud Functions to allow Admins to create new Staff accounts programmatically.
+- `storageService.ts`: Handles file uploads (employee docs, attachments) to Firebase Storage.
+
+### 3. Key Features Implemented
+- **Authentication**: Email/Password login. Admins and Field Officers have different permissions.
+- **Role-Based Access Control (RBAC)**:
+  - **Super Admin**: Full access.
+  - **HR Manager**: Can manage submissions, leaves, and staff.
+  - **Field Officer**: Limited access (View only or specific tasks).
+- **Employee Onboarding**:
+  - Complex multi-step form for new joiners.
+  - Multi-level approval workflow (Level 1 Supervisor -> Level 2 HR).
+  - Generates an Employee ID upon final approval.
+- **Leave Management**: Employees request leave; Managers approve/reject.
+- **Admin Dashboard**: Statistics, recent submissions, audit logs.
+
+### 4. Database Structure (Firestore)
+- **`staff`**: Admin user profiles ({ username, roleId, email, isDisabled }).
+- **`employees`**: Active employee profiles.
+- **`submissions`**: Pending onboarding forms with status tracking.
+- **`leaveRequests`**: Leave history.
+- **`roles`**: Configurable roles and permissions.
+
+### 5. Deployment
+- The app is configured for deployment on **Vercel** or **Netlify**.
+- Environment variables are managed via `.env.local` (VITE_FIREBASE_...).
+
+**Current Task**:
+[Explain what you want to do next here, e.g., "I need to add a new page for Performance Reviews" or "Help me style the login page better"]
