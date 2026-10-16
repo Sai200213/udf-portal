@@ -95,7 +95,9 @@ service firebase.storage {
     // Submission Documents (Joining form uploads)
     match /onboarding/{submissionId} {
       match /{allPaths=**} {
-        allow read: if isAdmin() || isCandidateDraftOwner(submissionId) || isEmployeeOwner(submissionId);
+        allow read: if isCandidateDraftOwner(submissionId) ||
+                      isEmployeeOwner(submissionId) ||
+                      isAdmin();
         allow write: if isAuthenticated() && isValidUpload() && (
           isCandidateDraftOwner(submissionId) ||
           isAdmin()
