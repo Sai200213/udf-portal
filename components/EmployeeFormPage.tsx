@@ -1994,25 +1994,8 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       setIsSubmitted(true);
       setSubmissionId(result.id || null);
 
-      // Explicitly delete the draft on the client so applicant never remains in draft list
-      if (draftIdToPass) {
-        try {
-          const { deleteFormDraft } = await import('../src/services/employeeService');
-          await deleteFormDraft(draftIdToPass);
-        } catch (delErr) {
-          console.warn('[SUBMIT] Client-side draft deletion notice:', delErr);
-        }
-      }
-
-      // Clear session storage after successful submission
+      // Clear local onboarding form session cache upon successful submission
       clearOnboardingSession();
-
-      // Clear temporary onboarding session after successful submission
-      try {
-        await signOut(auth);
-      } catch (e) {
-        console.warn('Sign-out after submission failed:', e);
-      }
     } else {
       // Mark the last step as error
       setSubmissionSteps(prev => {
@@ -2312,9 +2295,12 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     }
   };
 
-  // Wrap onBackToHome to also clear session storage on any exit
-  const handleBackToHome = () => {
+  // Wrap onBackToHome to also clear session storage and sign out on exit
+  const handleBackToHome = async () => {
     clearOnboardingSession();
+    try {
+      await signOut(auth);
+    } catch (e) { /* ignore */ }
     onBackToHome();
   };
 
@@ -2371,6 +2357,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
             <Button
               onClick={async () => {
                 await clearOnboardingSession();
+                try {
+                  await signOut(auth);
+                } catch (e) { /* ignore */ }
                 setFormData({});
                 setSavedDraftId('');
                 setSubmissionId(null);

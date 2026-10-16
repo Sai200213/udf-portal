@@ -690,8 +690,14 @@ export const checkApplicantDuplicates = async (identifiers: {
                 });
             }
         }
-    } catch (err) {
-        log.error("Error checking applicant duplicates:", err);
+    } catch (err: any) {
+        // Public candidates submitting forms do not have permissions to query all employees/submissions.
+        // This is expected and safe: full duplicate detection runs during Admin Review & Approval Gatekeeper.
+        if (err?.code === 'permission-denied' || err?.message?.includes('Missing or insufficient permissions')) {
+            log.log("[DUPLICATE_CHECK] Public duplicate scan deferred to Admin Review (candidate has restricted read permissions).");
+        } else {
+            log.error("Error checking applicant duplicates:", err);
+        }
     }
 
     if (matches.length === 0) {

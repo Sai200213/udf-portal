@@ -34,11 +34,18 @@ export const logSystemAction = async (
     actorOverride?: { id: string; name: string }
 ) => {
     try {
+        const currentUser = auth.currentUser;
+        // Safeguard: audit_logs is strictly reserved for authenticated staff/admin actions.
+        // Public/guest candidate actions are tracked directly in their respective collections
+        // (e.g. onboarding_submissions) to prevent unauthorized writes and audit log flooding.
+        if (!currentUser || currentUser.isAnonymous || actorOverride?.id === 'guest') {
+            return;
+        }
+
         const uniqueId = generateUniqueId();
         const docRef = doc(db, AUDIT_LOGS_COLLECTION, uniqueId);
-        const currentUser = auth.currentUser;
-        const actorId = actorOverride?.id || currentUser?.uid || 'system';
-        const actorName = actorOverride?.name || currentUser?.displayName || currentUser?.email || 'System';
+        const actorId = actorOverride?.id || currentUser.uid;
+        const actorName = actorOverride?.name || currentUser.displayName || currentUser.email || 'System';
 
         await setDoc(docRef, {
             action: actionType,

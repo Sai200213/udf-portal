@@ -1111,7 +1111,6 @@ const App: React.FC = () => {
       console.log("Form submitted to Firebase with ID:", firebaseId);
 
       const applicantName = getApplicantName(processedFormData, formSections) || 'Applicant';
-      logSystemAction('SUBMIT', 'SUBMISSION', `New joining form submitted by ${applicantName}`, { id: 'guest', name: applicantName });
 
       // Notify Level 1 for Submissions
       const config = workflowConfigs.find(c => c.moduleId === 'SUBMISSIONS');
@@ -1130,14 +1129,6 @@ const App: React.FC = () => {
           }
         } else {
           notifyRole(level1.roleId, `New New Joiner Application: ${applicantName}`, 'info', AppView.ADMIN_PORTAL_SUBMISSION_REVIEW, site?.id);
-        }
-      }
-      // If there was an active draft, delete it from Firestore
-      if (draftIdToClean) {
-        try {
-          await deleteFormDraft(draftIdToClean);
-        } catch (delErr) {
-          console.warn('[App] Draft deletion notice:', delErr);
         }
       }
       if (activeDraft?.id) {
