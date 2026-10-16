@@ -110,12 +110,14 @@ interface EmployeeFormPageProps {
   initialDraft?: { id: string; data: any; sectionIndex: number; inviteId?: string | null } | null;
 }
 
-// ─── Session Storage Keys for Reload Persistence ───
+// ─── Session Storage Keys for Reload Persistence & 30-Min Inactivity Timeout ───
 const SS_FORM_DATA = 'onboarding_formData';
 const SS_CURRENT_STEP = 'onboarding_currentStep';
 const SS_HAS_AUTH = 'onboarding_hasAuth';
 const SS_LINKED_UID = 'onboarding_linkedUid';
 const SS_SAVED_DRAFT_ID = 'onboarding_savedDraftId';
+const SS_LAST_ACTIVE = 'onboarding_lastActive';
+const ONBOARDING_SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes of inactivity
 
 /** Safely read JSON from sessionStorage with localStorage fallback */
 const readSession = <T,>(key: string, fallback: T): T => {
@@ -125,6 +127,26 @@ const readSession = <T,>(key: string, fallback: T): T => {
   } catch { return fallback; }
 };
 
+/** Check if the current onboarding session is valid and not expired due to inactivity */
+const isSessionActive = (): boolean => {
+  try {
+    const rawLastActive = sessionStorage.getItem(SS_LAST_ACTIVE) || localStorage.getItem(SS_LAST_ACTIVE);
+    if (!rawLastActive) return false;
+    const lastActiveTime = parseInt(rawLastActive, 10);
+    if (isNaN(lastActiveTime)) return false;
+    return (Date.now() - lastActiveTime) < ONBOARDING_SESSION_TIMEOUT_MS;
+  } catch { return false; }
+};
+
+/** Refresh session activity timestamp */
+const updateSessionActivity = () => {
+  try {
+    const nowStr = Date.now().toString();
+    sessionStorage.setItem(SS_LAST_ACTIVE, nowStr);
+    localStorage.setItem(SS_LAST_ACTIVE, nowStr);
+  } catch {}
+};
+
 /** Clear all onboarding session keys (text + files) */
 const clearOnboardingSession = async () => {
   sessionStorage.removeItem(SS_FORM_DATA);
@@ -132,10 +154,12 @@ const clearOnboardingSession = async () => {
   sessionStorage.removeItem(SS_HAS_AUTH);
   sessionStorage.removeItem(SS_LINKED_UID);
   sessionStorage.removeItem(SS_SAVED_DRAFT_ID);
+  sessionStorage.removeItem(SS_LAST_ACTIVE);
   sessionStorage.removeItem('referralInviteId');
   localStorage.removeItem(SS_FORM_DATA);
   localStorage.removeItem(SS_CURRENT_STEP);
   localStorage.removeItem(SS_SAVED_DRAFT_ID);
+  localStorage.removeItem(SS_LAST_ACTIVE);
   localStorage.removeItem('referralInviteId');
   await clearFileSession();
 };
@@ -218,23 +242,32 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     });
   }, []);
 
+  // ─── Session Continuity Check: active within 30 minutes and matching referral ───
+  const isContinuingSession = (): boolean => {
+    const params = new URLSearchParams(window.location.search);
+    const refId = params.get('ref');
+    // If not on a referral URL, check if general session is active within 30 min
+    if (!refId) return isSessionActive();
+
+    // If on a referral URL, check if session was already active with this same referral invite
+    const savedRef = sessionStorage.getItem('referralInviteId') || localStorage.getItem('referralInviteId');
+    return savedRef === refId && isSessionActive();
+  };
+
   // ─── Restore state from sessionStorage on mount ───
   const [currentStep, setCurrentStep] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ref')) return 0;
+    if (!isContinuingSession()) return 0;
     return readSession<number>(SS_CURRENT_STEP, 0);
   });
   const [formData, setFormData] = useState<Record<string, any>>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ref')) return {};
+    if (!isContinuingSession()) return {};
     return readSession<Record<string, any>>(SS_FORM_DATA, {});
   });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSavingDraft, setIsSavingDraft] = useState<boolean>(false);
   const [savedDraftId, setSavedDraftId] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ref')) return '';
+    if (!isContinuingSession()) return '';
     const saved = readSession<string | null>(SS_SAVED_DRAFT_ID, null);
     return saved || '';
   });
@@ -259,15 +292,13 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
   const [isLegacyClaimEnabled, setIsLegacyClaimEnabled] = useState(false);
 
-  // Hybrid Onboarding State — restore auth flag from session
+  // Hybrid Onboarding State — restore auth flag from session if active within 30-min window
   const [hasSelectedAuth, setHasSelectedAuth] = useState<boolean>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ref')) return false;
+    if (!isContinuingSession()) return false;
     return readSession<boolean>(SS_HAS_AUTH, false);
   });
   const [linkedUid, setLinkedUid] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('ref')) return null;
+    if (!isContinuingSession()) return null;
     return readSession<string | null>(SS_LINKED_UID, null);
   });
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(false);
@@ -351,6 +382,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       const serialized = JSON.stringify(serializable);
       sessionStorage.setItem(SS_FORM_DATA, serialized);
       localStorage.setItem(SS_FORM_DATA, serialized);
+      updateSessionActivity();
     } catch (e) { /* quota exceeded — ignore */ }
   }, [formData]);
 
@@ -398,6 +430,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       const serialized = JSON.stringify(currentStep);
       sessionStorage.setItem(SS_CURRENT_STEP, serialized);
       localStorage.setItem(SS_CURRENT_STEP, serialized);
+      updateSessionActivity();
     } catch (e) {}
   }, [currentStep]);
 
@@ -412,6 +445,34 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   useEffect(() => {
     sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(savedDraftId));
   }, [savedDraftId]);
+
+  // ─── Active Inactivity Watcher (30-Minute Timeout) ───
+  useEffect(() => {
+    if (!hasSelectedAuth) return;
+
+    // Refresh activity on user touch/clicks/keys in this tab
+    const handleActivity = () => updateSessionActivity();
+    window.addEventListener('keydown', handleActivity, { passive: true });
+    window.addEventListener('click', handleActivity, { passive: true });
+    window.addEventListener('touchstart', handleActivity, { passive: true });
+
+    // Periodic check every 1 minute to detect 30-minute timeout
+    const timer = setInterval(() => {
+      if (!isSessionActive()) {
+        console.warn('[Onboarding] Session timed out after 30 minutes of inactivity.');
+        setHasSelectedAuth(false);
+        sessionStorage.removeItem(SS_HAS_AUTH);
+        setAuthError('Your session has timed out due to 30 minutes of inactivity. Please select Google or Guest to resume your application.');
+      }
+    }, 60 * 1000);
+
+    return () => {
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      clearInterval(timer);
+    };
+  }, [hasSelectedAuth]);
 
   // ─── Conflict Resolution Handler ───
   const handleResolveConflict = async (resolution: 'cloud' | 'local') => {
@@ -780,6 +841,12 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         await loginAnonymously();
         setHasSelectedAuth(true);
         sessionStorage.setItem(SS_HAS_AUTH, 'true');
+        updateSessionActivity();
+        const guestRef = new URLSearchParams(window.location.search).get('ref');
+        if (guestRef) {
+          sessionStorage.setItem('referralInviteId', guestRef);
+          localStorage.setItem('referralInviteId', guestRef);
+        }
 
         if (!savedDraftId) {
           try {
@@ -843,6 +910,12 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
           setHasSelectedAuth(true);
           sessionStorage.setItem(SS_HAS_AUTH, 'true');
           sessionStorage.setItem(SS_LINKED_UID, JSON.stringify(user.uid));
+          updateSessionActivity();
+          const googleRef = new URLSearchParams(window.location.search).get('ref');
+          if (googleRef) {
+            sessionStorage.setItem('referralInviteId', googleRef);
+            localStorage.setItem('referralInviteId', googleRef);
+          }
           conflictCheckedForSessionRef.current = true;
 
           // Immediately check and restore cloud draft for this Google user
