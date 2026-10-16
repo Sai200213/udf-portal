@@ -868,6 +868,7 @@ const App: React.FC = () => {
       const { logoutUser } = await import('./src/services/authService');
       await logoutUser();
       localStorage.removeItem('portalType'); // Clear the scope hint
+      localStorage.removeItem('udf_user_last_active');
       try {
         sessionStorage.removeItem('activeAdminView');
         sessionStorage.removeItem('activeEmployeeView');
@@ -880,6 +881,59 @@ const App: React.FC = () => {
       log.error("Logout error", err);
     }
   }, [authUser, logSystemAction, navigateTo]);
+
+  // ─── Universal Inactivity Auto-Logout (60 Min for Admin, 120 Min for Employee) ───
+  useEffect(() => {
+    if (!authUser) {
+      localStorage.removeItem('udf_user_last_active');
+      return;
+    }
+
+    const ADMIN_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+    const EMPLOYEE_TIMEOUT_MS = 120 * 60 * 1000; // 2 hours
+    const timeoutDuration = authUser.type === UserType.ADMIN ? ADMIN_TIMEOUT_MS : EMPLOYEE_TIMEOUT_MS;
+
+    // Initialize or touch timestamp on login / active state
+    if (!localStorage.getItem('udf_user_last_active')) {
+      localStorage.setItem('udf_user_last_active', Date.now().toString());
+    }
+
+    let lastThrottledTouch = 0;
+    const touchActivity = () => {
+      const now = Date.now();
+      // Throttle localStorage writes to at most once every 10 seconds
+      if (now - lastThrottledTouch > 10000) {
+        lastThrottledTouch = now;
+        localStorage.setItem('udf_user_last_active', now.toString());
+      }
+    };
+
+    window.addEventListener('keydown', touchActivity, { passive: true });
+    window.addEventListener('click', touchActivity, { passive: true });
+    window.addEventListener('touchstart', touchActivity, { passive: true });
+    window.addEventListener('scroll', touchActivity, { passive: true });
+
+    const checker = setInterval(() => {
+      const raw = localStorage.getItem('udf_user_last_active');
+      if (raw) {
+        const lastActive = parseInt(raw, 10);
+        if (!isNaN(lastActive) && (Date.now() - lastActive) >= timeoutDuration) {
+          log.warn(`[InactivityTimeout] User ${authUser.name} (${authUser.type}) timed out due to inactivity.`);
+          localStorage.removeItem('udf_user_last_active');
+          handleLogout();
+          alert(`Your session has expired due to ${authUser.type === UserType.ADMIN ? '60' : '120'} minutes of inactivity. Please sign in again.`);
+        }
+      }
+    }, 30 * 1000); // Check every 30 seconds
+
+    return () => {
+      window.removeEventListener('keydown', touchActivity);
+      window.removeEventListener('click', touchActivity);
+      window.removeEventListener('touchstart', touchActivity);
+      window.removeEventListener('scroll', touchActivity);
+      clearInterval(checker);
+    };
+  }, [authUser, handleLogout]);
 
 
 
