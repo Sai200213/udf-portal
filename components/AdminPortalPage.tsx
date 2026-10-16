@@ -203,12 +203,22 @@ const AdminPortalPage: React.FC<AdminPortalPageProps> = (props) => {
     }
   }, [isSuperAdmin]);
 
+  const hasPermission = (p: Permission) => {
+    if (isSuperAdmin) return true;
+    if (userRole?.isDisabled === true) return false;
+    const overrides = (authUser as any)?.permissionOverrides;
+    if (overrides && overrides[p] !== undefined) {
+      return Boolean(overrides[p]);
+    }
+    return Boolean(userRole?.permissions?.includes(p));
+  };
+
   // New Export Handler
   const handleExportData = async (data: SubmittedFormData[]) => {
     try {
       const { exportEmployeesToCSV } = await import('../utils/exportUtils');
       // SECURITY: Pass RBAC permissions to the export generator
-      const canViewSensitive = isSuperAdmin || userRole?.permissions?.includes(Permission.VIEW_SENSITIVE_INFO) || false;
+      const canViewSensitive = isSuperAdmin || hasPermission(Permission.VIEW_SENSITIVE_INFO);
       const getVisibleFieldIds = () => {
         if (isSuperAdmin) return null;
         if (userRole?.fieldVisibility) {
@@ -284,8 +294,6 @@ const AdminPortalPage: React.FC<AdminPortalPageProps> = (props) => {
       addToast(latestNotif.message, latestNotif.type);
     }
   }, [notifications]);
-
-  const hasPermission = (p: Permission) => isSuperAdmin || userRole?.permissions.includes(p) || false;
 
   const canSeeModule = (p1: Permission, p2?: Permission) => {
     return hasPermission(p1) || (p2 ? hasPermission(p2) : false);
@@ -400,12 +408,6 @@ const AdminPortalPage: React.FC<AdminPortalPageProps> = (props) => {
   };
 
   const renderAdminContent = () => {
-    const hasPermission = (p: Permission) => {
-      if (isSuperAdmin) return true;
-      if (userRole?.isDisabled === true) return false;
-      return (authUser as any)?.permissionOverrides?.[p] === true || userRole?.permissions.includes(p) || false;
-    };
-    
     const accessDenied = <div className="p-8 text-center text-red-500 font-semibold bg-white rounded shadow">Access Denied. You do not have permission to view this page.</div>;
 
     switch (currentAdminView) {

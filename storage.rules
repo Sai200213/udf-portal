@@ -62,7 +62,7 @@ service firebase.storage {
     }
 
     function isOnboardingOwner(submissionId) {
-      return isEmployeeOwner(submissionId) || isDraftOwner(submissionId);
+      return request.auth.uid == submissionId || isEmployeeOwner(submissionId) || isDraftOwner(submissionId);
     }
 
     // New unified user-based storage folders
@@ -86,9 +86,18 @@ service firebase.storage {
     // Submission Documents (Joining form uploads)
     match /onboarding/{submissionId} {
       match /{allPaths=**} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && isValidUpload();
+        allow read: if isAdmin() || isOnboardingOwner(submissionId);
+        allow write: if isAuthenticated() && isValidUpload() && (
+          isAdmin() || 
+          isOnboardingOwner(submissionId)
+        );
       }
+    }
+
+    // Temporary Onboarding Uploads (Candidate attachment uploads)
+    match /onboarding_uploads/{allPaths=**} {
+      allow read: if isAdmin();
+      allow write: if isAuthenticated() && isValidUpload();
     }
 
     // Employee Documents (Post-approval organized files) - legacy path

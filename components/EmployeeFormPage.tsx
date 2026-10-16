@@ -117,10 +117,10 @@ const SS_HAS_AUTH = 'onboarding_hasAuth';
 const SS_LINKED_UID = 'onboarding_linkedUid';
 const SS_SAVED_DRAFT_ID = 'onboarding_savedDraftId';
 
-/** Safely read JSON from sessionStorage */
+/** Safely read JSON from sessionStorage with localStorage fallback */
 const readSession = <T,>(key: string, fallback: T): T => {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = sessionStorage.getItem(key) || localStorage.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
   } catch { return fallback; }
 };
@@ -133,6 +133,9 @@ const clearOnboardingSession = async () => {
   sessionStorage.removeItem(SS_LINKED_UID);
   sessionStorage.removeItem(SS_SAVED_DRAFT_ID);
   sessionStorage.removeItem('referralInviteId');
+  localStorage.removeItem(SS_FORM_DATA);
+  localStorage.removeItem(SS_CURRENT_STEP);
+  localStorage.removeItem(SS_SAVED_DRAFT_ID);
   localStorage.removeItem('referralInviteId');
   await clearFileSession();
 };
@@ -337,7 +340,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // ─── Persist formData to sessionStorage (exclude non-serializable File objects) ───
+  // ─── Persist formData locally to sessionStorage & localStorage (instant, 0 Firestore writes/reads) ───
   useEffect(() => {
     try {
       const serializable: Record<string, any> = {};
@@ -345,80 +348,57 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         if (val instanceof File || val instanceof Blob) continue; // skip files
         serializable[key] = val;
       }
-      sessionStorage.setItem(SS_FORM_DATA, JSON.stringify(serializable));
+      const serialized = JSON.stringify(serializable);
+      sessionStorage.setItem(SS_FORM_DATA, serialized);
+      localStorage.setItem(SS_FORM_DATA, serialized);
     } catch (e) { /* quota exceeded — ignore */ }
   }, [formData]);
 
-  // ─── Auto-save: fires ONLY when formData/currentStep actually changes ───
-  useEffect(() => {
-    if (!hasSelectedAuth) return;
+  // ─── Milestone Draft Sync: Synchronizes local draft to Firestore only at key milestones ───
+  const syncDraftMilestone = useCallback(async (stepToSave?: number) => {
+    if (!hasSelectedAuth || isFormEmpty(formData, referralInvite) || isSavingRef.current) return;
+    const targetStep = stepToSave !== undefined ? stepToSave : currentStep;
+    const saveSnapshot = JSON.stringify({ data: formData, step: targetStep });
+    if (saveSnapshot === lastSavedDataRef.current) return;
 
-    // Do not auto-save if form is empty of user-typed content (ignore referral pre-fills)
-    if (isFormEmpty(formData, referralInvite)) return;
-
-    // Build a snapshot of the current data to compare with last save
-    const currentSnapshot = JSON.stringify({ data: formData, step: currentStep });
-
-    // Skip if nothing changed since last save
-    if (currentSnapshot === lastSavedDataRef.current) return;
-
-    // Skip if a save is already in progress
-    if (isSavingRef.current) return;
-
-    // Clear any existing timer (debounce reset)
-    if (autoSaveTimeout.current) {
-      clearTimeout(autoSaveTimeout.current);
-    }
-
-    // Debounce save (1.5s on first edit, 3s on subsequent edits)
-    const saveDelay = lastSavedDataRef.current === '' ? 1500 : 3000;
-
-    // Set debounce timer
-    autoSaveTimeout.current = setTimeout(async () => {
-      // Double-check nothing is saving and data still differs
-      if (isSavingRef.current) return;
-      const saveSnapshot = JSON.stringify({ data: formData, step: currentStep });
-      if (saveSnapshot === lastSavedDataRef.current) return;
-
-      isSavingRef.current = true;
-      setIsSavingDraft(true);
-      try {
-        const draftId = await onSaveDraft(formData, currentStep, savedDraftId || undefined);
+    isSavingRef.current = true;
+    setIsSavingDraft(true);
+    try {
+      const draftId = await onSaveDraft(formData, targetStep, savedDraftId || undefined);
+      if (draftId) {
         setSavedDraftId(draftId);
-        lastSavedDataRef.current = saveSnapshot; // Mark as saved
-
-        // For Guest users: show recovery code popup on FIRST auto-save only
-        if (!linkedUid && !hasShownFirstSavePopup.current) {
-          hasShownFirstSavePopup.current = true;
-          setShowSaveModal(true);
-        }
-      } catch (e: any) {
-        if (e?.message?.includes('APPLICATION_ALREADY_SUBMITTED')) {
-          const subId = e.message.split(':')[1] || savedDraftId || '';
-          await clearOnboardingSession();
-          setFormData({});
-          setIsSubmitted(true);
-          setSubmissionId(subId);
-          return;
-        }
-        console.warn('[AUTO-SAVE] Draft save failed (will retry on next change):', e);
-      } finally {
-        isSavingRef.current = false;
-        setIsSavingDraft(false);
+        lastSavedDataRef.current = saveSnapshot;
+        sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
+        localStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
       }
-    }, saveDelay);
-
-    return () => {
-      if (autoSaveTimeout.current) {
-        clearTimeout(autoSaveTimeout.current);
-        autoSaveTimeout.current = null;
+      // For Guest users: show recovery code popup on first milestone save
+      if (!linkedUid && !hasShownFirstSavePopup.current) {
+        hasShownFirstSavePopup.current = true;
+        setShowSaveModal(true);
       }
-    };
-  }, [formData, currentStep, hasSelectedAuth, onSaveDraft, referralInvite]);
+    } catch (e: any) {
+      if (e?.message?.includes('APPLICATION_ALREADY_SUBMITTED')) {
+        const subId = e.message.split(':')[1] || savedDraftId || '';
+        await clearOnboardingSession();
+        setFormData({});
+        setIsSubmitted(true);
+        setSubmissionId(subId);
+        return;
+      }
+      console.warn('[MILESTONE-SAVE] Draft sync failed:', e);
+    } finally {
+      isSavingRef.current = false;
+      setIsSavingDraft(false);
+    }
+  }, [formData, currentStep, hasSelectedAuth, onSaveDraft, referralInvite, savedDraftId, linkedUid]);
 
   // ─── Persist currentStep ───
   useEffect(() => {
-    sessionStorage.setItem(SS_CURRENT_STEP, JSON.stringify(currentStep));
+    try {
+      const serialized = JSON.stringify(currentStep);
+      sessionStorage.setItem(SS_CURRENT_STEP, serialized);
+      localStorage.setItem(SS_CURRENT_STEP, serialized);
+    } catch (e) {}
   }, [currentStep]);
 
   // ─── Persist auth flags ───
@@ -1518,9 +1498,6 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         );
         updates['originalAadhaarStoragePath'] = originalStoragePath;
         updates['originalAadhaarFileName'] = originalFile.name;
-        if (password) {
-          updates['originalAadhaarPassword'] = password;
-        }
 
 
 
@@ -1765,7 +1742,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   const handleNextStep = () => {
     if (validateStepFields(currentStep)) {
       if (currentStep < activeSections.length) {
-        setCurrentStep(prev => prev + 1);
+        const nextStep = currentStep + 1;
+        setCurrentStep(nextStep);
+        syncDraftMilestone(nextStep);
       }
     } else {
       const firstErrorId = Object.keys(formErrors)[0];

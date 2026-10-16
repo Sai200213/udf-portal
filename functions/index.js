@@ -354,6 +354,43 @@ async function clearFailedAttempts(db, employeeId) {
     await db.collection('_auth_attempts').doc(employeeId).delete();
 }
 
+// Daily rate limiter for Claim Profile (max 3 attempts per 24 hours per employee ID)
+async function checkClaimDailyAttempts(db, employeeId) {
+    const attemptsRef = db.collection('_auth_attempts').doc(`claim_${employeeId}`);
+    const snap = await attemptsRef.get();
+    const now = Date.now();
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const MAX_DAILY_ATTEMPTS = 3;
+
+    if (snap.exists) {
+        const data = snap.data();
+        if (data.firstAttemptAt && (now - data.firstAttemptAt > ONE_DAY_MS)) {
+            await attemptsRef.set({ count: 1, firstAttemptAt: now, lockedUntil: null });
+            return false;
+        }
+        if (data.lockedUntil && data.lockedUntil > now) {
+            return true;
+        }
+        const newCount = (data.count || 0) + 1;
+        if (newCount >= MAX_DAILY_ATTEMPTS) {
+            await attemptsRef.set({ count: newCount, firstAttemptAt: data.firstAttemptAt || now, lockedUntil: (data.firstAttemptAt || now) + ONE_DAY_MS });
+            return true;
+        } else {
+            await attemptsRef.set({ count: newCount, firstAttemptAt: data.firstAttemptAt || now, lockedUntil: null });
+            return false;
+        }
+    } else {
+        await attemptsRef.set({ count: 1, firstAttemptAt: now, lockedUntil: null });
+        return false;
+    }
+}
+
+async function clearClaimDailyAttempts(db, employeeId) {
+    try {
+        await db.collection('_auth_attempts').doc(`claim_${employeeId}`).delete();
+    } catch (e) {}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EMPLOYEE GOOGLE LOGIN — SSO to Custom Token Exchange
 // Exchanges a valid Google ID Token for an Employee Custom Token.
@@ -549,8 +586,8 @@ exports.employeeLogin = functions.https.onCall(async (request) => {
         }
 
         if (isMatch) {
-            // SECURITY: Verify the employee is active and not relieved or blocked
-            let isInactive = subData.isActive === false || subData.isRelieved === true || subData.isBlocked === true || !!subData.deletedAt;
+            // SECURITY: Verify the employee is active, not disabled, not relieved, not terminated, and not blocked
+            let isInactive = subData.isActive === false || subData.isDisabled === true || subData.isRelieved === true || subData.isBlocked === true || subData.status === 'relieved' || subData.status === 'terminated' || subData.status === 'rejected' || !!subData.deletedAt;
             if (!isInactive) {
                 // Cross-check employees collection by portalId (sub.id) or employeeId
                 let empCheck = await db.collection('employees').doc(sub.id).get();
@@ -560,15 +597,15 @@ exports.employeeLogin = functions.https.onCall(async (request) => {
                 }
                 if (empCheck.exists) {
                     const checkData = empCheck.data();
-                    if (checkData.isActive === false || checkData.isRelieved === true || checkData.isBlocked === true || !!checkData.deletedAt) {
+                    if (checkData.isActive === false || checkData.isDisabled === true || checkData.isRelieved === true || checkData.isBlocked === true || checkData.status === 'relieved' || checkData.status === 'terminated' || !!checkData.deletedAt) {
                         isInactive = true;
                     }
                 }
             }
 
             if (isInactive) {
-                console.warn(`[LOGIN] Blocked login for inactive/relieved employee ${employeeId}`);
-                throw new functions.https.HttpsError('permission-denied', 'This account is inactive. Relieved employees cannot log in.');
+                console.warn(`[LOGIN] Blocked login for disabled/inactive/relieved employee ${employeeId}`);
+                throw new functions.https.HttpsError('permission-denied', 'This account is disabled or inactive. Disabled employees cannot log in.');
             }
 
             matchedDoc = sub;
@@ -599,9 +636,9 @@ exports.employeeLogin = functions.https.onCall(async (request) => {
             }
 
             if (isMatch) {
-                if (empData.isActive === false || empData.isRelieved === true || empData.isBlocked === true || !!empData.deletedAt) {
-                    console.warn(`[LOGIN] Blocked login for inactive/relieved employee ${employeeId}`);
-                    throw new functions.https.HttpsError('permission-denied', 'This account is inactive. Relieved employees cannot log in.');
+                if (empData.isActive === false || empData.isDisabled === true || empData.isRelieved === true || empData.isBlocked === true || empData.status === 'relieved' || empData.status === 'terminated' || !!empData.deletedAt) {
+                    console.warn(`[LOGIN] Blocked login for disabled/inactive/relieved employee ${employeeId}`);
+                    throw new functions.https.HttpsError('permission-denied', 'This account is disabled or inactive. Disabled employees cannot log in.');
                 }
                 matchedDoc = emp;
                 matchedData = empData;
@@ -810,11 +847,27 @@ exports.verifyAndResetEmployeePassword = functions.https.onCall(async (request) 
         // SUCCESS: Clear rate limit counter and hash password with bcrypt
         await clearFailedAttempts(db, `reset_${employeeId}`);
         const passwordHash = await hashPassword(newPassword);
-        await empRef.update({
+        const updatePayload = {
             passwordHash: passwordHash,
             mockPassword: admin.firestore.FieldValue.delete(), // Remove plain-text password
             isDefaultPassword: false
-        });
+        };
+
+        const batch = db.batch();
+        batch.update(empRef, updatePayload);
+
+        // Update all related onboarding_submissions documents to prevent dual-collection desynchronization
+        const subSnaps = await db.collection('onboarding_submissions')
+            .where('employeeId', '==', employeeId).get();
+        subSnaps.docs.forEach(d => batch.update(d.ref, updatePayload));
+
+        if (empRef.id) {
+            const subDirectSnap = await db.collection('onboarding_submissions').doc(empRef.id).get();
+            if (subDirectSnap.exists) {
+                batch.update(subDirectSnap.ref, updatePayload);
+            }
+        }
+        await batch.commit();
 
         return { success: true, message: 'Password reset successfully' };
 
@@ -887,11 +940,23 @@ exports.changeEmployeePassword = functions.https.onCall(async (request) => {
 
         // Hash new password with bcrypt and remove legacy plain-text password
         const newHash = await hashPassword(newPassword);
-        await docRef.update({
+        const updatePayload = {
             passwordHash: newHash,
             mockPassword: admin.firestore.FieldValue.delete(),
             isDefaultPassword: false
-        });
+        };
+
+        const batch = db.batch();
+        batch.update(docRef, updatePayload);
+
+        // Update all matching documents across both collections to prevent desync
+        const [allSubs, allEmps] = await Promise.all([
+            db.collection('onboarding_submissions').where('employeeId', '==', employeeId).get(),
+            db.collection('employees').where('employeeId', '==', employeeId).get()
+        ]);
+        allSubs.docs.forEach(d => batch.update(d.ref, updatePayload));
+        allEmps.docs.forEach(d => batch.update(d.ref, updatePayload));
+        await batch.commit();
 
         return { success: true };
     } catch (error) {
@@ -1017,13 +1082,25 @@ exports.linkEmployeeGoogleAccount = functions.https.onCall(async (request) => {
             throw new functions.https.HttpsError('permission-denied', 'Incorrect password');
         }
 
-        // Link Google UID in the correct collection
-        await db.collection(collectionName).doc(docId).update({
+        // Link Google UID across both collections
+        const linkPayload = {
             uid: googleUid,
             linkedUid: googleUid,
             authProvider: 'google',
             linkedGoogleEmail: email
-        });
+        };
+
+        const batch = db.batch();
+        batch.update(db.collection(collectionName).doc(docId), linkPayload);
+
+        const cleanId = employeeId.trim().toUpperCase();
+        const [allSubs, allEmps] = await Promise.all([
+            db.collection('onboarding_submissions').where('employeeId', '==', cleanId).get(),
+            db.collection('employees').where('employeeId', '==', cleanId).get()
+        ]);
+        allSubs.docs.forEach(d => batch.update(d.ref, linkPayload));
+        allEmps.docs.forEach(d => batch.update(d.ref, linkPayload));
+        await batch.commit();
 
         return { success: true, message: 'Google account linked successfully' };
 
@@ -1050,6 +1127,12 @@ exports.verifyEmployeePassword = functions.https.onCall(async (request) => {
     try {
         const db = admin.firestore();
 
+        // Rate-limit password verification attempts
+        const isLocked = await checkAndIncrementFailedAttempts(db, `verify_${employeeId}`);
+        if (isLocked) {
+            throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again in 1 hour.');
+        }
+
         // Check both collections
         let empData = null;
 
@@ -1072,13 +1155,14 @@ exports.verifyEmployeePassword = functions.https.onCall(async (request) => {
         let isVerified = false;
         if (empData.passwordHash) {
             isVerified = await verifyPassword(password, empData.passwordHash);
-        } else if (empData.mockPassword) {
-            isVerified = empData.mockPassword === password;
         }
 
         if (!isVerified) {
             throw new functions.https.HttpsError('permission-denied', 'Incorrect password');
         }
+
+        // Clear failed attempts counter on successful verification
+        await clearFailedAttempts(db, `verify_${employeeId}`);
 
         return { success: true };
     } catch (error) {
@@ -1090,6 +1174,11 @@ exports.verifyEmployeePassword = functions.https.onCall(async (request) => {
 
 // 5. Unlink Google Account
 exports.unlinkEmployeeGoogleAccount = functions.https.onCall(async (request) => {
+    // 1. Security Gate: Must be an authenticated session
+    if (!request.auth || !request.auth.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'You must be logged into your account to unlink Google.');
+    }
+
     let { employeeId, currentPassword } = request.data;
     
     if (employeeId) employeeId = employeeId.trim().toUpperCase();
@@ -1100,6 +1189,13 @@ exports.unlinkEmployeeGoogleAccount = functions.https.onCall(async (request) => 
 
     try {
         const db = admin.firestore();
+
+        // Rate-limit password verification attempts to prevent brute-forcing
+        const isLocked = await checkAndIncrementFailedAttempts(db, `unlink_${employeeId}`);
+        if (isLocked) {
+            throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again in 1 hour.');
+        }
+
         let isVerified = false;
         let docRefs = [];
 
@@ -1129,8 +1225,10 @@ exports.unlinkEmployeeGoogleAccount = functions.https.onCall(async (request) => 
         if (docRefs.length === 0) throw new functions.https.HttpsError('not-found', 'Employee not found');
         if (!isVerified) throw new functions.https.HttpsError('permission-denied', 'Incorrect password');
 
+        // Clear failed attempts counter on successful verification
+        await clearFailedAttempts(db, `unlink_${employeeId}`);
+
         const updates = {
-            uid: admin.firestore.FieldValue.delete(),
             linkedUid: 'none',
             authProvider: 'manual',
             linkedGoogleEmail: admin.firestore.FieldValue.delete()
@@ -1212,12 +1310,24 @@ exports.setupEmployeePassword = functions.https.onCall(async (request) => {
 
         // Hash with bcrypt (secure, salted, slow)
         const passwordHash = await hashPassword(newPassword);
-        await docRef.update({
+        const updatePayload = {
             passwordHash: passwordHash,
             mockPassword: admin.firestore.FieldValue.delete(),
             isDefaultPassword: false,
             authProvider: 'manual'
-        });
+        };
+
+        const batch = db.batch();
+        batch.update(docRef, updatePayload);
+
+        const cleanId = employeeId.trim().toUpperCase();
+        const [allSubs, allEmps] = await Promise.all([
+            db.collection('onboarding_submissions').where('employeeId', '==', cleanId).get(),
+            db.collection('employees').where('employeeId', '==', cleanId).get()
+        ]);
+        allSubs.docs.forEach(d => batch.update(d.ref, updatePayload));
+        allEmps.docs.forEach(d => batch.update(d.ref, updatePayload));
+        await batch.commit();
 
         console.log(`[SETUP_PASSWORD] Password set for ${employeeId} in ${collectionName}`);
         return { success: true };
@@ -1344,7 +1454,7 @@ exports.selfLinkGoogleAccount = functions.https.onCall(async (request) => {
         }
 
         // Link Google Account
-        await docRef.update({
+        const linkPayload = {
             uid: googleUid,
             linkedUid: googleUid,
             authProvider: 'google',
@@ -1352,7 +1462,19 @@ exports.selfLinkGoogleAccount = functions.https.onCall(async (request) => {
             isDefaultPassword: false,
             passwordHash: '', // Clear manual password hash if linking Google
             mockPassword: admin.firestore.FieldValue.delete() // Clear plain text password
-        });
+        };
+
+        const batch = db.batch();
+        batch.update(docRef, linkPayload);
+
+        const cleanId = employeeId.trim().toUpperCase();
+        const [allSubs, allEmps] = await Promise.all([
+            db.collection('onboarding_submissions').where('employeeId', '==', cleanId).get(),
+            db.collection('employees').where('employeeId', '==', cleanId).get()
+        ]);
+        allSubs.docs.forEach(d => batch.update(d.ref, linkPayload));
+        allEmps.docs.forEach(d => batch.update(d.ref, linkPayload));
+        await batch.commit();
 
         console.log(`[SELF_LINK_GOOGLE] Google account linked for ${employeeId} in ${collectionName}`);
         return { success: true };
@@ -1373,6 +1495,12 @@ exports.adminControlEmployeeAuth = functions.https.onCall(async (request) => {
         db.collection('staff').doc(request.auth.uid).get(),
         db.collection('staff_accounts').doc(request.auth.uid).get()
     ]);
+
+    // SECURITY: Ensure caller staff account is active and not disabled
+    const staffDoc = staffAccSnap.exists ? staffAccSnap.data() : (staffSnap.exists ? staffSnap.data() : (userSnap.exists ? userSnap.data() : null));
+    if (staffDoc && (staffDoc.isDisabled === true || staffDoc.isActive === false)) {
+        throw new functions.https.HttpsError('permission-denied', 'Account is disabled. Access denied.');
+    }
 
     // SECURITY: Only SuperAdmin can reset employee passwords or mutate auth providers
     const isSuperAdmin = (userSnap.exists && userSnap.data().roleId === 'role-super-admin') ||
@@ -1403,8 +1531,8 @@ exports.adminControlEmployeeAuth = functions.https.onCall(async (request) => {
             const hashed = await hashPassword(newPassword);
             const updates = {
                 passwordHash: hashed,
-                mockPassword: admin.firestore.FieldValue.delete(),
-                isDefaultPassword: false,
+                mockPassword: admin.firestore.FieldValue.delete(), // Plaintext password permanently removed
+                isDefaultPassword: true, // Forces employee to change password on next login
                 authProvider: 'manual'
             };
             await Promise.all(docRefs.map(ref => ref.update(updates)));
@@ -1448,54 +1576,54 @@ exports.adminControlEmployeeAuth = functions.https.onCall(async (request) => {
             return { success: true };
         }
         else if (action === 'reset_to_default') {
-            // Read the employee data to generate default password
+            // Read the employee data to generate default password or use admin custom password
             const empData = empSnap.empty ? null : empSnap.docs[0].data();
             const subData = subSnap.empty ? null : subSnap.docs[0].data();
             const sourceData = empData || subData;
             
             if (!sourceData) throw new functions.https.HttpsError('not-found', 'Cannot read employee data');
             
-            // Get name: applicantName or from formData
-            const fullName = sourceData.applicantName || sourceData.name || 'user';
-            const firstName = fullName.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-            
-            // Get DOB year: search in data object for any date-of-birth field
-            let year = '123';
-            const dataObj = sourceData.data || sourceData.formData || {};
-            for (const [key, val] of Object.entries(dataObj)) {
-                if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    // Check if key looks like a DOB field (or just use the first date found after name)
-                    const keyLower = key.toLowerCase();
-                    if (keyLower.includes('birth') || keyLower.includes('dob')) {
-                        year = val.split('-')[0];
-                        break;
-                    }
-                }
-            }
-            // Fallback: check all date fields if no explicit DOB key found
-            if (year === '123') {
+            let tempPassword = (payload && payload.newPassword) ? payload.newPassword : '';
+            if (!tempPassword) {
+                // Get name: applicantName or from formData
+                const fullName = sourceData.applicantName || sourceData.name || 'user';
+                const firstName = fullName.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+                
+                // Get DOB year: search in data object for any date-of-birth field
+                let year = '123';
+                const dataObj = sourceData.data || sourceData.formData || {};
                 for (const [key, val] of Object.entries(dataObj)) {
                     if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                        // Use the first date field that looks like a birth date (year < 2010)
-                        const y = parseInt(val.split('-')[0]);
-                        if (y > 1950 && y < 2010) {
+                        const keyLower = key.toLowerCase();
+                        if (keyLower.includes('birth') || keyLower.includes('dob')) {
                             year = val.split('-')[0];
                             break;
                         }
                     }
                 }
+                if (year === '123') {
+                    for (const [key, val] of Object.entries(dataObj)) {
+                        if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                            const y = parseInt(val.split('-')[0]);
+                            if (y > 1950 && y < 2010) {
+                                year = val.split('-')[0];
+                                break;
+                            }
+                        }
+                    }
+                }
+                tempPassword = `${firstName}${year}`;
             }
             
-            const defaultPassword = `${firstName}${year}`;
-            const hashed = await hashPassword(defaultPassword);
+            const hashed = await hashPassword(tempPassword);
             const updates = {
                 passwordHash: hashed,
-                mockPassword: defaultPassword,
-                isDefaultPassword: true,
+                mockPassword: admin.firestore.FieldValue.delete(), // Plaintext password is NEVER saved in database
+                isDefaultPassword: true, // Forces employee to change password on next login
                 authProvider: 'manual'
             };
             await Promise.all(docRefs.map(ref => ref.update(updates)));
-            return { success: true, generatedPassword: defaultPassword };
+            return { success: true, generatedPassword: tempPassword };
         }
         else {
             throw new functions.https.HttpsError('invalid-argument', 'Invalid action');
@@ -1535,9 +1663,13 @@ exports.getSecureDocumentURL = functions.https.onCall(async (request) => {
             db.collection('staff_accounts').doc(uid).get()
         ]);
         
-        if (userSnap.exists || staffSnap.exists || staffAccSnap.exists) {
+        const staffDoc = (staffAccSnap.exists ? staffAccSnap.data() : (staffSnap.exists ? staffSnap.data() : (userSnap.exists ? userSnap.data() : null)));
+        if (staffDoc) {
+            if (staffDoc.isDisabled === true || staffDoc.isActive === false || staffDoc.status === 'relieved' || staffDoc.status === 'terminated') {
+                throw new functions.https.HttpsError('permission-denied', 'This staff account is disabled. Access denied.');
+            }
             isAdminOrStaff = true;
-        } else if (request.auth.token && request.auth.token.email) {
+        } else if (request.auth.token && request.auth.token.email && request.auth.token.email_verified) {
             // Fallback: Check if user exists in staff collections by email (for legacy staff matched by email)
             const email = request.auth.token.email;
             const [usersByEmail, staffByEmail, staffAccByEmail] = await Promise.all([
@@ -1545,7 +1677,12 @@ exports.getSecureDocumentURL = functions.https.onCall(async (request) => {
                 db.collection('staff').where('email', '==', email).limit(1).get(),
                 db.collection('staff_accounts').where('email', '==', email).limit(1).get()
             ]);
-            if (!usersByEmail.empty || !staffByEmail.empty || !staffAccByEmail.empty) {
+            const matchedDoc = (!staffAccByEmail.empty ? staffAccByEmail.docs[0] : (!staffByEmail.empty ? staffByEmail.docs[0] : (!usersByEmail.empty ? usersByEmail.docs[0] : null)));
+            if (matchedDoc) {
+                const sData = matchedDoc.data();
+                if (sData.isDisabled === true || sData.isActive === false || sData.status === 'relieved' || sData.status === 'terminated') {
+                    throw new functions.https.HttpsError('permission-denied', 'This staff account is disabled. Access denied.');
+                }
                 isAdminOrStaff = true;
             }
         }
@@ -1741,6 +1878,10 @@ exports.moveStorageFolder = functions.https.onCall(async (request) => {
         ]);
         
         if (userSnap.exists || staffSnap.exists || staffAccSnap.exists) {
+            const staffDoc = (staffAccSnap.exists ? staffAccSnap.data() : (staffSnap.exists ? staffSnap.data() : userSnap.data())) || {};
+            if (staffDoc.isDisabled === true || staffDoc.isActive === false || staffDoc.status === 'relieved' || staffDoc.status === 'terminated') {
+                throw new functions.https.HttpsError('permission-denied', 'This staff account is disabled. Access denied.');
+            }
             isAdminOrStaff = true;
         }
 
@@ -2005,6 +2146,12 @@ exports.claimEmployeeProfile = functions.https.onCall(async (request) => {
     const trimmedId = String(employeeId).trim();
 
     try {
+        // Rate limit: Max 3 attempts per 24 hours per employee ID
+        const isLocked = await checkClaimDailyAttempts(db, trimmedId.toUpperCase());
+        if (isLocked) {
+            throw new functions.https.HttpsError('resource-exhausted', 'Maximum claim attempts (3) exceeded for this ID today. Please try again tomorrow or contact HR.');
+        }
+
         // 2. SECURITY CHECK: Is this Google account already linked to ANY employee or submission?
         // This prevents one Google account from claiming multiple profiles.
         if (currentUid) {
@@ -2025,7 +2172,10 @@ exports.claimEmployeeProfile = functions.https.onCall(async (request) => {
             throw new functions.https.HttpsError('failed-precondition', 'Profile claim feature is currently disabled. Please contact HR.');
         }
         const config = configSnap.data();
-        const metrics = config.verificationMetrics || [];
+        let metrics = config.verificationMetrics;
+        if (!Array.isArray(metrics) || metrics.length === 0) {
+            metrics = ['aadhaar', 'dob', 'phone']; // Fallback safe metrics
+        }
 
         const normalize = (s) => String(s || '').replace(/[\s\-\/\.]/g, '').toLowerCase();
         const parseDateToYMD = (dateStr) => {
@@ -2045,12 +2195,21 @@ exports.claimEmployeeProfile = functions.https.onCall(async (request) => {
             return null;
         };
 
-        // 4. Find the legacy import record
-        const legacySnap = await db.collection('legacy_employee_imports')
-            .where('employeeId', '==', trimmedId)
+        // 4. Find the legacy import record (case-insensitive lookup: try uppercase first, then fallback to raw trimmed)
+        const normalizedEmpId = trimmedId.toUpperCase();
+        let legacySnap = await db.collection('legacy_employee_imports')
+            .where('employeeId', '==', normalizedEmpId)
             .where('claimed', '==', false)
             .limit(1)
             .get();
+
+        if (legacySnap.empty && normalizedEmpId !== trimmedId) {
+            legacySnap = await db.collection('legacy_employee_imports')
+                .where('employeeId', '==', trimmedId)
+                .where('claimed', '==', false)
+                .limit(1)
+                .get();
+        }
 
         if (legacySnap.empty) {
             throw new functions.https.HttpsError('not-found', 'No unclaimed profile found with this Employee ID. It may have already been claimed, or the ID is incorrect.');
@@ -2089,6 +2248,9 @@ exports.claimEmployeeProfile = functions.https.onCall(async (request) => {
                 throw new functions.https.HttpsError('permission-denied', `Verification failed. The ${metric} you entered does not match our records.`);
             }
         }
+
+        // Clear daily failed attempts counter upon successful verification
+        await clearClaimDailyAttempts(db, trimmedId.toUpperCase());
 
         // 6. Link verified legacy record to current Google account
         await legacyDoc.ref.update({

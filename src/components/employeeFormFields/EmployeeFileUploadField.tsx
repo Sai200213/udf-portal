@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { EmployeeFieldProps } from '../../../types';
 import Input from '../../../components/common/Input';
-import { uploadFile, getSecureURL } from '../../services/storageService';
+import { uploadSubmissionDocument, getSecureURL } from '../../services/storageService';
 
 const EmployeeFileUploadField: React.FC<EmployeeFieldProps> = ({ field, value, onChange, error, disabled }) => {
     const [uploading, setUploading] = useState(false);
@@ -37,9 +37,8 @@ const EmployeeFileUploadField: React.FC<EmployeeFieldProps> = ({ field, value, o
         if (file) {
             setUploading(true);
             try {
-                // Upload immediately to a temp folder, labeled by date
-                const path = `onboarding_uploads/${new Date().toISOString().split('T')[0]}`;
-                const storagePath = await uploadFile(file, path);
+                // Upload securely under the applicant's session folder
+                const storagePath = await uploadSubmissionDocument(field.id, file);
 
                 // Pass the secure storage path to the form state instead of the public URL
                 onChange(field.id, storagePath);

@@ -34,16 +34,20 @@ async function createAdminUser() {
         const user = userCredential.user;
         console.log('✅ Firebase Auth user created:', user.uid);
 
-        // Add to 'staff' collection with admin role
-        await setDoc(doc(db, 'staff', user.uid), {
+        // Write to both modern 'staff_accounts' and legacy 'staff' collections for full compatibility
+        const staffPayload = {
             username: email.split('@')[0],
             email: email,
             name: 'Admin User',
             roleId: 'role-hr-manager',
-            isDisabled: false
-        });
+            isDisabled: false,
+            createdAt: new Date().toISOString()
+        };
 
-        console.log('✅ Admin user added to Firestore staff collection');
+        await setDoc(doc(db, 'staff_accounts', user.uid), staffPayload);
+        await setDoc(doc(db, 'staff', user.uid), staffPayload);
+
+        console.log('✅ Admin user added to Firestore staff_accounts & staff collections');
         console.log('\n🎉 Setup complete! You can now login with:');
         console.log(`   Email: ${email}`);
         console.log('   Password: (the password you provided)');

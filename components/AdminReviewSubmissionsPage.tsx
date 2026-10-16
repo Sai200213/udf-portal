@@ -444,7 +444,15 @@ const AdminReviewSubmissionsPage: React.FC<AdminReviewSubmissionsPageProps> = ({
   }, [effectiveAllowedSiteIds]);
   const effectiveIsSuperAdmin = isSuperAdmin ?? contextIsSuperAdmin;
   const allRoles = roles || contextRoles || [];
-  const hasPermission = (p: Permission) => effectiveIsSuperAdmin || (userRole?.isDisabled !== true && ((authUser as any)?.permissionOverrides?.[p] === true || userRole?.permissions.includes(p) || false));
+  const hasPermission = (p: Permission) => {
+    if (effectiveIsSuperAdmin) return true;
+    if (userRole?.isDisabled === true) return false;
+    const overrides = (authUser as any)?.permissionOverrides;
+    if (overrides && overrides[p] !== undefined) {
+      return Boolean(overrides[p]);
+    }
+    return Boolean(userRole?.permissions?.includes(p));
+  };
   const hasManagePerm = hasPermission(Permission.SUBMISSIONS_APPROVE);
   const hasViewScopeAll = effectiveIsSuperAdmin || hasPermission(Permission.SUBMISSIONS_VIEW_SCOPE_ALL);
   const [selectedSubmissionForDetails, setSelectedSubmissionForDetails] = useState<SubmittedFormData | null>(null);

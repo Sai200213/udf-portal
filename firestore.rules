@@ -155,7 +155,9 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read: if true;
       allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM') ||
-        (docId == 'sites' && (hasPermission('SITES_MANAGE') || hasPermission('SITES_EDIT_INFO')));
+        (docId == 'sites' && (hasPermission('SITES_MANAGE') || hasPermission('SITES_EDIT_INFO'))) ||
+        (docId == 'workflows' && hasPermission('MANAGE_WORKFLOWS')) ||
+        (docId == 'form_sections' && hasPermission('MANAGE_FORMS'));
     }
 
     // ─── Admin / Super-Admin Accounts ───────────────────────────────────────
@@ -182,13 +184,15 @@ service cloud.firestore {
     match /employees/{userId} {
       allow get: if resource == null ||
                     isSelfEmployee(userId, resource.data) || 
-                    hasActiveCorrectionToken(resource.data) ||
                     (isAdmin() && canStaffViewSite(resource.data.get('currentSiteId', resource.data.get('siteId', ''))));
       allow list: if isAdmin() || (isAuthenticated() && (
         resource.data.get('uid', '') == request.auth.uid || 
         resource.data.get('linkedUid', '') == request.auth.uid
       ));
-      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() || hasActiveCorrectionToken(resource.data)
+      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() 
+        || (hasActiveCorrectionToken(resource.data) &&
+            request.resource.data.activeCorrectionToken == null &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileData', 'data', 'lastUpdated', 'activeCorrectionToken', 'panNumber', 'aadhaarNumber', 'uanNumber', 'phoneNumber']))
         || (isAuthenticated() && (request.auth.uid == userId || resource.data.get('uid', '') == request.auth.uid) && (
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileStatus', 'lastUpdated', 'needsProfileCompletion', 'profilePhotoURL']) &&
@@ -211,7 +215,6 @@ service cloud.firestore {
     match /onboarding_submissions/{id} {
       allow get: if resource == null ||
                     isSelfSubmission(resource.data) || 
-                    hasActiveCorrectionToken(resource.data) ||
                     (isAdmin() && canStaffViewSite(resource.data.get('siteId', '')));
       allow list: if isAdmin() || (isAuthenticated() && (
         resource.data.get('linkedUid', '') == request.auth.uid ||
@@ -223,7 +226,10 @@ service cloud.firestore {
         ))
       ));
       allow create: if isAuthenticated();
-      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() || hasActiveCorrectionToken(resource.data)
+      allow update: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin() 
+        || (hasActiveCorrectionToken(resource.data) &&
+            request.resource.data.activeCorrectionToken == null &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['formData', 'data', 'profileData', 'lastUpdated', 'activeCorrectionToken', 'panNumber', 'aadhaarNumber', 'uanNumber', 'phoneNumber']))
         || (isAuthenticated() && (resource.id == request.auth.uid || resource.data.uid == request.auth.uid || resource.data.linkedUid == request.auth.uid));
       allow delete: if hasPermission('SUBMISSIONS_APPROVE') || isSuperAdmin(); 
     }
@@ -234,17 +240,28 @@ service cloud.firestore {
       allow get: if true;
       // Listing or browsing drafts is strictly restricted to Admins or the draft owner (by UID or email)
       allow list: if isAdmin() || (isAuthenticated() && (resource.data.ownerUid == request.auth.uid || (resource.data.ownerEmail != null && resource.data.ownerEmail == request.auth.token.email)));
-      // Anyone authenticated can create or update their draft by recovery code ID
+      // Anyone authenticated can create their draft by recovery code ID
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      // Updates allowed only if admin or the owner who created it
+      allow update: if isAdmin() || (isAuthenticated() && (
+        resource.data.ownerUid == request.auth.uid || 
+        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', ''))
+      ));
       // Deletions allowed for admin or the draft owner
-      allow delete: if isAdmin() || isAuthenticated();
+      allow delete: if isAdmin() || (isAuthenticated() && (
+        resource.data.ownerUid == request.auth.uid || 
+        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', ''))
+      ));
     }
 
     // ─── Leave Requests ──────────────────────────────────────────────────────
     match /leave_requests/{id} {
       allow read: if isAdmin() || 
-                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+                     (isRegisteredUser() && (
+                       resource.data.employeeId == request.auth.uid || 
+                       resource.data.get('uid', '') == request.auth.uid ||
+                       isOwnerOfPortalId(resource.data.employeeId)
+                     ));
       allow create: if isRegisteredUser() && (
         isAdmin() || (
           request.resource.data.status == 'Pending' &&
@@ -273,7 +290,11 @@ service cloud.firestore {
     // ─── Account Update Requests ─────────────────────────────────────────────
     match /account_updates/{id} {
       allow read: if isAdmin() || 
-                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+                     (isRegisteredUser() && (
+                       resource.data.employeeId == request.auth.uid || 
+                       resource.data.get('uid', '') == request.auth.uid ||
+                       isOwnerOfPortalId(resource.data.employeeId)
+                     ));
       allow create: if isRegisteredUser() && (
         isAdmin() || (
           request.resource.data.status == 'Pending' &&
@@ -302,7 +323,11 @@ service cloud.firestore {
     // ─── Resignations ────────────────────────────────────────────────────────
     match /resignations/{id} {
       allow read: if isAdmin() || 
-                     (isRegisteredUser() && (resource.data.employeeId == request.auth.uid || resource.data.get('uid', '') == request.auth.uid));
+                     (isRegisteredUser() && (
+                       resource.data.employeeId == request.auth.uid || 
+                       resource.data.get('uid', '') == request.auth.uid ||
+                       isOwnerOfPortalId(resource.data.employeeId)
+                     ));
       allow create: if isRegisteredUser() && (
         isAdmin() || (
           request.resource.data.status == 'Pending' &&
@@ -346,20 +371,28 @@ service cloud.firestore {
         resource.data.targetUserId == request.auth.uid ||
         (request.auth.token.get('employeeId', '') != '' && resource.data.targetUserId == request.auth.token.employeeId) ||
         isOwnerOfPortalId(resource.data.targetUserId) ||
+        resource.data.targetUserId == ('ROLE:' + getUserRoleId()) ||
+        resource.data.targetUserId == 'ROLE:employee' ||
+        resource.data.targetUserId == 'ROLE:role-security-guard' ||
         (isAdmin() && resource.data.targetUserId in ['all_admins', 'admin'])
       ));
-      allow create: if isAuthenticated();
+      allow create: if isRegisteredUser();
       allow update, delete: if isAdmin() || (isAuthenticated() && (
         resource.data.targetUserId == request.auth.uid ||
         (request.auth.token.get('employeeId', '') != '' && resource.data.targetUserId == request.auth.token.employeeId) ||
-        isOwnerOfPortalId(resource.data.targetUserId)
+        isOwnerOfPortalId(resource.data.targetUserId) ||
+        resource.data.targetUserId == ('ROLE:' + getUserRoleId()) ||
+        resource.data.targetUserId == 'ROLE:employee' ||
+        resource.data.targetUserId == 'ROLE:role-security-guard'
       ));
     }
 
     // ─── Audit Logs ───────────────────────────────────────────────────────────
     match /audit_logs/{id} {
       allow read: if hasPermission('VIEW_AUDIT_LOGS') || (isAuthenticated() && resource.data.actorId == request.auth.uid);
-      allow create: if isAuthenticated();
+      allow create: if isRegisteredUser() && (
+        isAdmin() || request.resource.data.actorId == request.auth.uid
+      );
       allow update, delete: if isSuperAdmin();
     }
 
@@ -384,13 +417,13 @@ service cloud.firestore {
     // ─── Portal Config ───────────────────────────────────────────────────────
     match /portal_config/{id} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM') || hasPermission('BGV_CONFIGURE_FIELDS');
     }
 
     // ─── Editable Fields Config ──────────────────────────────────────────────
     match /editable_fields/{id} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM');
     }
 
     // ─── Vacancies ───────────────────────────────────────────────────────────
@@ -405,6 +438,9 @@ service cloud.firestore {
                      hasPermission('BGV_VIEW') || 
                      hasPermission('BGV_VIEW_DOSSIER') || 
                      hasPermission('BGV_MANAGE') || 
+                     hasPermission('BGV_DISPATCH_VENDOR') || 
+                     hasPermission('BGV_UPLOAD_CERTIFICATE') || 
+                     hasPermission('BGV_APPROVE_REJECT') || 
                      hasPermission('BGV_VENDOR') || 
                      (isAuthenticated() && (
                        resource.data.get('vendorId', '') == request.auth.uid ||

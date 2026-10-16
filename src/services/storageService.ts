@@ -145,6 +145,19 @@ export const getSecureURL = async (storagePath: string | any): Promise<string> =
 };
 
 /**
+ * Safely revokes a client-side Blob URL created by getSecureURL to free browser memory.
+ */
+export const revokeSecureURL = (url?: string | null): void => {
+    if (url && typeof url === 'string' && url.startsWith('blob:')) {
+        try {
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            // Ignore if already revoked or invalid
+        }
+    }
+};
+
+/**
  * Upload a document with real-time progress tracking (resumable).
  * Used for joining form file uploads.
  */

@@ -233,8 +233,22 @@ const DataCorrectionPage: React.FC<DataCorrectionPageProps> = ({ sections }) => 
     }
 
     if (requestDoc.targetType === 'employee') {
-      // Active Employee: logged-in UID must match employee ID
-      return !!authUser && authUser.id === requestDoc.targetId;
+      // Active Employee: verify against doc ID, Employee ID, Portal ID, or record UID
+      if (!authUser) return false;
+      const targetId = String(requestDoc.targetId || '').trim().toLowerCase();
+      const authId = String(authUser.id || '').trim().toLowerCase();
+      const authEmpId = String((authUser as any).employeeId || '').trim().toLowerCase();
+      const authPortalId = String((authUser as any).portalId || '').trim().toLowerCase();
+      const dataEmpId = String(targetData?.employeeId || '').trim().toLowerCase();
+      const dataUid = String(targetData?.uid || '').trim().toLowerCase();
+
+      return (
+        authId === targetId ||
+        (authEmpId !== '' && authEmpId === targetId) ||
+        (authPortalId !== '' && authPortalId === targetId) ||
+        (authEmpId !== '' && dataEmpId !== '' && authEmpId === dataEmpId) ||
+        (authId !== '' && dataUid !== '' && authId === dataUid)
+      );
     } else {
       // Pending submission
       if (authNeededProvider === null) {

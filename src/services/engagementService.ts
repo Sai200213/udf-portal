@@ -376,6 +376,18 @@ export const createRewardRedemption = async (
     pointsSpent: number
 ): Promise<boolean> => {
     try {
+        const streakRef = doc(db, 'user_engagement', userId);
+        const streakSnap = await getDoc(streakRef);
+        const currentPoints = streakSnap.exists() ? (streakSnap.data().points || 0) : 0;
+        
+        if (currentPoints < pointsSpent) {
+            log.warn(`Insufficient points for ${userId}: has ${currentPoints}, needs ${pointsSpent}`);
+            return false;
+        }
+
+        const newPoints = currentPoints - pointsSpent;
+        await updateDoc(streakRef, { points: newPoints });
+
         await addDoc(collection(db, 'reward_redemptions'), {
             userId,
             userName,

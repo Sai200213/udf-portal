@@ -208,24 +208,23 @@ const BlogDashboardPage: React.FC = () => {
             return;
         }
 
-        const newPoints = points - cost;
-        setPoints(newPoints);
-        setRedemptionSuccess(item);
+        if (!userId) {
+            alert("Please log in to claim rewards.");
+            return;
+        }
 
         try {
-            if (userId && streak) {
-                const docRef = doc(db, 'user_engagement', userId);
-                await setDoc(docRef, {
-                    ...streak,
-                    points: newPoints
-                }, { merge: true });
-
-                // Record the redemption in Firestore reward_redemptions for HR fulfillment
-                await createRewardRedemption(userId, userName, item, cost);
+            const success = await createRewardRedemption(userId, userName, item, cost);
+            if (success) {
+                setPoints(prev => Math.max(0, prev - cost));
+                setRedemptionSuccess(item);
+                setTimeout(() => setRedemptionSuccess(null), 5000);
+            } else {
+                alert("Reward redemption failed or insufficient points balance.");
             }
-            setTimeout(() => setRedemptionSuccess(null), 5000);
         } catch (err) {
             console.error("Failed to update points after redemption:", err);
+            alert("An error occurred while claiming reward. Please try again.");
         }
     };
 

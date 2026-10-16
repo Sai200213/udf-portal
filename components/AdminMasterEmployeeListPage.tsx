@@ -562,9 +562,9 @@ const AdminMasterEmployeeListPage: React.FC<AdminMasterEmployeeListPageProps> = 
     };
   }, [employees]);
 
-  const canExport = isSuperAdmin || userRole?.permissions?.includes(Permission.EXPORT_DATA);
-  const canDelete = isSuperAdmin || userRole?.permissions?.includes(Permission.DELETE_EMPLOYEE);
-  const canViewSensitive = isSuperAdmin || userRole?.permissions?.includes(Permission.VIEW_SENSITIVE_INFO);
+  const canExport = isSuperAdmin || hasPermission(Permission.EXPORT_DATA);
+  const canDelete = isSuperAdmin || hasPermission(Permission.DELETE_EMPLOYEE);
+  const canViewSensitive = isSuperAdmin || hasPermission(Permission.VIEW_SENSITIVE_INFO);
 
   const isSensitiveField = (label: string) => {
     const sensitiveKeywords = ['mobile', 'phone', 'email', 'bank', 'account', 'aadhaar', 'pan', 'ifsc', 'salary', 'ctc', 'amount'];
@@ -892,6 +892,11 @@ const AdminMasterEmployeeListPage: React.FC<AdminMasterEmployeeListPageProps> = 
                               <div className="text-sm font-bold text-gray-900 group-hover:text-blue-700">
                                 {emp.applicantName || 'N/A'}
                                 {((safeEmp as any).employmentHistory?.length > 0 || (safeEmp as any).previousEmployeeId || (safeEmp as any).importedVia === 'rejoin') && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black uppercase">Rejoined</span>}
+                                {((safeEmp as any).resignationStatus === 'Notice Period' || (safeEmp as any).pendingRelievingDate) && (
+                                  <span className="ml-2 text-[10px] bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded font-black uppercase">
+                                    Notice Period (Until {new Date((safeEmp as any).pendingRelievingDate || (safeEmp as any).relievingDate).toLocaleDateString()})
+                                  </span>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {hasPermission(Permission.EMPLOYEES_VIEW_ONBOARDING_METHOD) && (
@@ -1789,12 +1794,15 @@ const AdminMasterEmployeeListPage: React.FC<AdminMasterEmployeeListPageProps> = 
                       <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest block flex items-center"><Key size={14} className="mr-1.5" /> Force Password Reset (Manual)</label>
                       <div className="space-y-3">
                         <Input
-                          label="New Manual Password"
+                          label="Set New Password for Employee"
                           type="password"
                           value={newManualPassword}
                           onChange={e => setNewManualPassword(e.target.value)}
-                          placeholder="Min 6 characters"
+                          placeholder="Enter new password (min 6 characters)"
                         />
+                        <p className="text-[10px] text-gray-500 font-medium px-1">
+                          Set a temporary password of your choice. When the employee logs in with this password, they will be required to change it to their own secret password.
+                        </p>
                         <Button
                           variant="primary"
                           className="w-full bg-blue-600 font-bold"
@@ -1803,7 +1811,7 @@ const AdminMasterEmployeeListPage: React.FC<AdminMasterEmployeeListPageProps> = 
                             setIsAuthUpdating(true);
                             try {
                               await adminResetEmployeePassword(managementTarget.employeeId!, newManualPassword);
-                              alert("Password updated and hashed successfully.");
+                              alert("Password reset successfully.\n\nThe employee can log in with this password and will be prompted to change it immediately.");
                               setNewManualPassword('');
                             } catch (e: any) {
                               alert("Failed: " + e.message);
@@ -1812,35 +1820,9 @@ const AdminMasterEmployeeListPage: React.FC<AdminMasterEmployeeListPageProps> = 
                             }
                           }}
                         >
-                          {isAuthUpdating ? <RefreshCw className="animate-spin mr-2" size={16} /> : <Shield size={16} className="mr-2" />} Update & Secure Password
+                          {isAuthUpdating ? <RefreshCw className="animate-spin mr-2" size={16} /> : <Shield size={16} className="mr-2" />} Reset Password & Require Change
                         </Button>
                       </div>
-                    </div>
-                    <div className="space-y-4">
-                      <label className="text-[10px] font-black text-amber-600 uppercase tracking-widest block flex items-center"><Key size={14} className="mr-1.5" /> Reset to Default Password</label>
-                      <p className="text-[10px] text-gray-400 font-medium px-1 -mt-2">
-                        Resets password back to <span className="font-mono font-bold text-slate-600">firstname + birth year</span> (e.g. john1995). Useful when employee forgets their password.
-                      </p>
-                      <Button
-                        variant="secondary"
-                        className="w-full border-amber-200 text-amber-700 hover:bg-amber-50 font-bold"
-                        disabled={isAuthUpdating}
-                        onClick={async () => {
-                          if (window.confirm(`Reset password for ${managementTarget.applicantName || managementTarget.employeeId} to their default (firstname + birth year)?`)) {
-                            setIsAuthUpdating(true);
-                            try {
-                              const generatedPwd = await adminResetToDefaultPassword(managementTarget.employeeId!);
-                              alert(`Password reset to default: ${generatedPwd}\n\nEmployee can login with their ID and this password.`);
-                            } catch (e: any) {
-                              alert("Failed: " + e.message);
-                            } finally {
-                              setIsAuthUpdating(false);
-                            }
-                          }
-                        }}
-                      >
-                        {isAuthUpdating ? <RefreshCw className="animate-spin mr-2" size={16} /> : <RotateCcw size={16} className="mr-2" />} Reset to Default Password
-                      </Button>
                     </div>
 
                     <div className="pt-4 border-t border-slate-100">

@@ -63,6 +63,52 @@ const LEAVE_REQ_COL = 'leave_requests';
 const chunkArray = <T>(arr: T[], size: number): T[][] =>
     Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
 
+/**
+ * Resolves an employee's Firestore DocumentReference, Snapshot and data by checking:
+ * 1. Direct document ID in 'employees' (e.g. UDF-202609-XXXX)
+ * 2. 'employeeId' field (e.g. HY100123)
+ * 3. 'portalId' field
+ * 4. 'submissionId' field
+ */
+export const resolveEmployeeDoc = async (idOrEmployeeId: string): Promise<{ ref: any; snap: any; data: FirestoreEmployee } | null> => {
+    if (!idOrEmployeeId) return null;
+    const cleanId = String(idOrEmployeeId).trim();
+    if (!cleanId) return null;
+
+    // 1. Direct doc ID
+    const directRef = doc(db, EMPLOYEES_COLLECTION, cleanId);
+    const directSnap = await getDoc(directRef);
+    if (directSnap.exists()) {
+        return { ref: directRef, snap: directSnap, data: { id: directSnap.id, ...directSnap.data() } as unknown as FirestoreEmployee };
+    }
+
+    // 2. Query by employeeId
+    const qEmp = query(collection(db, EMPLOYEES_COLLECTION), where('employeeId', '==', cleanId), limit(1));
+    const snapEmp = await getDocs(qEmp);
+    if (!snapEmp.empty) {
+        const doc0 = snapEmp.docs[0];
+        return { ref: doc0.ref, snap: doc0, data: { id: doc0.id, ...doc0.data() } as unknown as FirestoreEmployee };
+    }
+
+    // 3. Query by portalId
+    const qPortal = query(collection(db, EMPLOYEES_COLLECTION), where('portalId', '==', cleanId), limit(1));
+    const snapPortal = await getDocs(qPortal);
+    if (!snapPortal.empty) {
+        const doc0 = snapPortal.docs[0];
+        return { ref: doc0.ref, snap: doc0, data: { id: doc0.id, ...doc0.data() } as unknown as FirestoreEmployee };
+    }
+
+    // 4. Query by submissionId
+    const qSub = query(collection(db, EMPLOYEES_COLLECTION), where('submissionId', '==', cleanId), limit(1));
+    const snapSub = await getDocs(qSub);
+    if (!snapSub.empty) {
+        const doc0 = snapSub.docs[0];
+        return { ref: doc0.ref, snap: doc0, data: { id: doc0.id, ...doc0.data() } as unknown as FirestoreEmployee };
+    }
+
+    return null;
+};
+
 // --- Draft Submissions ---
 
 export const subscribeToDrafts = (onUpdate: (drafts: DraftSubmission[]) => void) => {
@@ -1748,7 +1794,8 @@ export const updateSubmissionStatus = async (
                 }
             });
 
-            await setDoc(doc(db, EMPLOYEES_COLLECTION, submissionId), newEmployee);
+            const approvalBatch = writeBatch(db);
+            approvalBatch.set(doc(db, EMPLOYEES_COLLECTION, submissionId), newEmployee);
 
             // Link rehiredAs on previous employee record if rehire
             const matchedRehireId = (liveDuplicateCheck?.matchType === 'EX_EMPLOYEE_REHIRE' && liveDuplicateCheck.matchedId)
@@ -1762,7 +1809,7 @@ export const updateSubmissionStatus = async (
                     const oldEmpRef = doc(db, EMPLOYEES_COLLECTION, matchedRehireId);
                     const oldSnap = await getDoc(oldEmpRef);
                     if (oldSnap.exists()) {
-                        await updateDoc(oldEmpRef, { rehiredAs: empId });
+                        approvalBatch.update(oldEmpRef, { rehiredAs: empId });
                         log.log(`[REHIRE_LINK] Linked old employee ${matchedRehireId} rehiredAs -> ${empId}`);
                     }
                 } catch (linkErr) {
@@ -1770,15 +1817,11 @@ export const updateSubmissionStatus = async (
                 }
             }
 
-            // Increment joined count on referral invite
+            // Increment joined count on referral invite atomically
             if (data.inviteId) {
                 try {
                     const inviteRef = doc(db, 'referral_invites', data.inviteId);
-                    const inviteSnap = await getDoc(inviteRef);
-                    if (inviteSnap.exists()) {
-                        const currentJoined = inviteSnap.data().joined || 0;
-                        await updateDoc(inviteRef, { joined: currentJoined + 1 });
-                    }
+                    approvalBatch.update(inviteRef, { joined: increment(1) });
                 } catch (e) {
                     console.error("Failed to increment joined count on referral invite:", e);
                 }
@@ -1798,23 +1841,32 @@ export const updateSubmissionStatus = async (
             if (data.legacyImportId) {
                 try {
                     const legacyRef = doc(db, 'legacy_employee_imports', data.legacyImportId);
-                    await updateDoc(legacyRef, { 
-                        status: 'Finalized',
-                        finalEmployeeId: empId,
-                        linkedUid: data.linkedUid || '',
-                        finalizedAt: new Date().toISOString()
-                    });
-                    log.log(`[LEGACY_HOOK] Finalized legacy record ${data.legacyImportId} for employee ${empId}`);
+                    const legacySnap = await getDoc(legacyRef);
+                    if (legacySnap.exists()) {
+                        approvalBatch.update(legacyRef, { 
+                            status: 'Finalized',
+                            finalEmployeeId: empId,
+                            linkedUid: data.linkedUid || '',
+                            finalizedAt: new Date().toISOString()
+                        });
+                        log.log(`[LEGACY_HOOK] Finalized legacy record ${data.legacyImportId} for employee ${empId}`);
+                    }
                 } catch (legacyErr) {
                     console.error("[LEGACY_HOOK_ERROR] Failed to finalize legacy record:", legacyErr);
                     // We don't block the whole approval if this fails, but it's a serious sync issue
                 }
             }
-        }
-    }
 
-    // Update submission (this now includes employeeId and mockPassword if approved)
-    await updateDoc(submissionRef, updates);
+            // Atomically update submission alongside employee creation
+            approvalBatch.update(submissionRef, updates);
+            await approvalBatch.commit();
+        } else {
+            // Non-approval status updates
+            await updateDoc(submissionRef, updates);
+        }
+    } else {
+        await updateDoc(submissionRef, updates);
+    }
 };
 
 export const markEmployeeProfileComplete = async (employeeId: string): Promise<void> => {
@@ -2357,8 +2409,10 @@ export const relieveEmployee = async (
         throw new Error(`Employee record with ID ${employeeId} was not found in the database.`);
     }
 
-    await updateDoc(empRef, {
+    const batch = writeBatch(db);
+    batch.update(empRef, {
         isActive: false,
+        status: 'Relieved',
         isRelieved: true,
         relievingDate: relievingDate,
         relievingReason: relievingReason
@@ -2368,7 +2422,7 @@ export const relieveEmployee = async (
     const subQuery = query(collection(db, SUBMISSIONS_COLLECTION), where("employeeId", "==", employeeId));
     const subSnap = await getDocs(subQuery);
     if (!subSnap.empty) {
-        await updateDoc(subSnap.docs[0].ref, {
+        batch.update(subSnap.docs[0].ref, {
             isActive: false,
             status: 'Relieved',
             isRelieved: true,
@@ -2376,6 +2430,8 @@ export const relieveEmployee = async (
             relievingReason: relievingReason
         });
     }
+
+    await batch.commit();
 
     const folderName = empData?.driveFolderName;
     const applicantName = empData?.applicantName ||
@@ -2385,6 +2441,49 @@ export const relieveEmployee = async (
     log.log(`Relieving employee ${employeeId} (${applicantName}) on ${relievingDate}. Reason: ${relievingReason}`);
     // Move to a "Relieved" folder in Drive (uses block_employee action which moves to BLOCKED/RELIEVED folder)
     await moveEmployeeFolder(applicantName, employeeId, 'block_employee', folderName);
+};
+
+// Set Employee Notice Period on Approved Future Resignation
+export const setEmployeeNoticePeriod = async (
+    employeeId: string,
+    relievingDate: string,
+    reason: string = 'Resignation'
+): Promise<void> => {
+    let empRef = doc(db, EMPLOYEES_COLLECTION, employeeId);
+    let empSnap = await getDoc(empRef);
+
+    if (!empSnap.exists()) {
+        const q = query(collection(db, EMPLOYEES_COLLECTION), where("employeeId", "==", employeeId), limit(1));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+            empRef = qSnap.docs[0].ref;
+            empSnap = qSnap.docs[0] as any;
+        }
+    }
+
+    if (!empSnap.exists()) return;
+
+    const batch = writeBatch(db);
+    batch.update(empRef, {
+        resignationStatus: 'Notice Period',
+        pendingRelievingDate: relievingDate,
+        relievingDate: relievingDate,
+        relievingReason: reason
+    });
+
+    const subQuery = query(collection(db, SUBMISSIONS_COLLECTION), where("employeeId", "==", employeeId));
+    const subSnap = await getDocs(subQuery);
+    if (!subSnap.empty) {
+        batch.update(subSnap.docs[0].ref, {
+            resignationStatus: 'Notice Period',
+            pendingRelievingDate: relievingDate,
+            relievingDate: relievingDate,
+            relievingReason: reason
+        });
+    }
+
+    await batch.commit();
+    log.log(`[Notice Period] Set notice period for employee ${employeeId} until ${relievingDate}`);
 };
 
 // Enhanced: Rejoin Employee with full details (date, site, designation)
@@ -2418,12 +2517,12 @@ export const rejoinEmployee = async (
 
     // NEW LOGIC: Re-hire with a new Employee ID
     if (newEmployeeId) {
-        // check if new ID already exists
-        const newEmpRef = doc(db, EMPLOYEES_COLLECTION, newEmployeeId);
-        const exists = await getDoc(newEmpRef);
-        if (exists.exists()) {
+        // check if new ID already exists across both collections
+        const exists = await checkEmployeeIdExists(newEmployeeId);
+        if (exists) {
             throw new Error(`Employee ID ${newEmployeeId} is already taken.`);
         }
+        const newEmpRef = doc(db, EMPLOYEES_COLLECTION, newEmployeeId);
 
         const applicantName = empData.applicantName || 'Unknown';
         const newFolderName = `${newEmployeeId} - ${applicantName}`;
@@ -2484,12 +2583,12 @@ export const rejoinEmployee = async (
         // Remove ID from object if it was copied
         if (newEmployeeData.id) delete newEmployeeData.id;
 
-        await setDoc(newEmpRef, newEmployeeData);
-
-        // Update OLD record to link to new one
-        await updateDoc(empRef, {
+        const batch = writeBatch(db);
+        batch.set(newEmpRef, newEmployeeData);
+        batch.update(empRef, {
             rehiredAs: newEmployeeId
         } as any);
+        await batch.commit();
 
         // CREATE NEW DRIVE FOLDER FOR NEW ID (Asynchronous)
         (async () => {
@@ -2586,10 +2685,9 @@ export const assignToSite = async (
     employeeId: string,
     assignment: Omit<EmployeeAssignment, 'id' | 'status'>
 ) => {
-    const empRef = doc(db, EMPLOYEES_COLLECTION, employeeId);
-    const empSnap = await getDoc(empRef);
-    if (!empSnap.exists()) throw new Error("Employee not found");
-    const empData = empSnap.data() as FirestoreEmployee;
+    const resolved = await resolveEmployeeDoc(employeeId);
+    if (!resolved) throw new Error("Employee not found");
+    const { ref: empRef, data: empData } = resolved;
 
     const newAssignment: EmployeeAssignment = {
         ...assignment,
@@ -2631,10 +2729,9 @@ export const relieveFromSite = async (
     relievingDate: string,
     relievingReason: string
 ) => {
-    const empRef = doc(db, EMPLOYEES_COLLECTION, employeeId);
-    const empSnap = await getDoc(empRef);
-    if (!empSnap.exists()) throw new Error("Employee not found");
-    const empData = empSnap.data() as FirestoreEmployee;
+    const resolved = await resolveEmployeeDoc(employeeId);
+    if (!resolved) throw new Error("Employee not found");
+    const { ref: empRef, data: empData } = resolved;
 
     const active = empData.activeAssignments || [];
     const assignmentToRelieve = active.find(a => a.id === assignmentId);
@@ -2697,8 +2794,9 @@ export const updateEmployeeClientIds = async (
     employeeId: string,
     clientIds: Record<string, string>
 ) => {
-    const empRef = doc(db, EMPLOYEES_COLLECTION, employeeId);
-    await updateDoc(empRef, { clientIds });
+    const resolved = await resolveEmployeeDoc(employeeId);
+    if (!resolved) throw new Error("Employee not found");
+    await updateDoc(resolved.ref, { clientIds });
     await logSystemAction('UPDATE', 'EMPLOYEES', `Updated client IDs / site badges for employee ${employeeId}`);
 };
 
@@ -4904,21 +5002,25 @@ export const getReferralInvite = async (refId: string): Promise<ReferralInvite |
 };
 
 export const incrementReferralClicks = async (refId: string) => {
-    const docRef = doc(db, 'referral_invites', refId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-        const clicks = snap.data().clicks || 0;
-        await updateDoc(docRef, { clicks: clicks + 1 });
+    if (!refId) return;
+    try {
+        const docRef = doc(db, 'referral_invites', refId);
+        await updateDoc(docRef, { clicks: increment(1) });
+    } catch (e) {
+        console.error("Failed to increment referral clicks:", e);
     }
 };
 
 export const incrementReferralStarts = async (refId: string) => {
-    const docRef = doc(db, 'referral_invites', refId);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-        const data = snap.data();
-        const currentCount = data.started || data.starts || 0;
-        await updateDoc(docRef, { started: currentCount + 1, starts: currentCount + 1 });
+    if (!refId) return;
+    try {
+        const docRef = doc(db, 'referral_invites', refId);
+        await updateDoc(docRef, { 
+            started: increment(1), 
+            starts: increment(1) 
+        });
+    } catch (e) {
+        console.error("Failed to increment referral starts:", e);
     }
 };
 

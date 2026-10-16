@@ -529,6 +529,7 @@ export interface ResignationRequest {
   approvalHistory: ApprovalHistoryEntry[];
   submissionDate: string;
   adminComments?: string;
+  isProcessed?: boolean;
 }
 
 // --- Audit Log Types ---

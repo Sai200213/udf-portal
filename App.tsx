@@ -49,7 +49,7 @@ import {
   deleteWorkflowRequest, deleteDisciplinaryAction,
   findSubmissionIdByEmployeeId, permanentDeleteEmployee, getEmployeeRecordCounts, checkEmployeeIdExists,
   resolveEmployeeFullContext, EmployeeFullContext,
-  relieveEmployee, rejoinEmployee, isPortalId
+  relieveEmployee, rejoinEmployee, isPortalId, setEmployeeNoticePeriod
 } from './src/services/employeeService';
 import { uploadSubmissionDocument } from './src/services/storageService';
 import { FirestoreEmployee } from './types';
@@ -67,7 +67,7 @@ import {
 import {
   subscribeToLeaveRequests, submitLeaveRequest, updateLeaveRequest,
   subscribeToAccountUpdates, submitAccountUpdateRequest, updateAccountUpdateRequest,
-  subscribeToResignationRequests, submitResignationRequest, updateResignationRequest,
+  subscribeToResignationRequests, submitResignationRequest, updateResignationRequest, processDueResignations,
   subscribeToDisciplinaryActions, addDisciplinaryAction,
   revertWorkflowRequest
 } from './src/services/requestService';
@@ -903,26 +903,11 @@ const App: React.FC = () => {
   }, [authUser?.type, isSuperAdmin]);
 
 
-  // Employee-specific Subscriptions (Personal Record & Submission)
+  // Employee-specific Subscriptions (Personal Record & Submission) are centrally managed by DataContext
   useEffect(() => {
     if (!authUser || authUser.type !== UserType.EMPLOYEE) {
       if (!authUser) setEmployees([]);
-      return;
     }
-
-    log.log(`[App] Setting up personal record subscription for employee: ${authUser.id}`);
-    const unsubEmployee = subscribeToEmployeeByUid(authUser.id, (emp) => {
-      if (emp) {
-        log.log(`[App] Received personal employee record for ${authUser.id}`);
-        setEmployees([emp]);
-      } else {
-        setEmployees([]); // Explicitly set empty if not found to avoid hanging
-      }
-    });
-
-    return () => {
-      unsubEmployee();
-    };
   }, [authUser, setEmployees]);
 
 
@@ -1248,9 +1233,9 @@ const App: React.FC = () => {
         logSystemAction('APPROVAL', 'LEAVES', `Final approval for ${r.employeeName} leave.`);
         sendNotification(r.employeeId, `Your ${r.leaveType} request has been fully approved.`, 'success', AppView.EMPLOYEE_LEAVE_REQUESTS);
 
-        const startDate = new Date(r.startDate);
-        const endDate = new Date(r.endDate);
-        const daysTaken = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24)) + 1;
+        const [sY, sM, sD] = r.startDate.split('-').map(Number);
+        const [eY, eM, eD] = r.endDate.split('-').map(Number);
+        const daysTaken = Math.round((Date.UTC(eY, eM - 1, eD) - Date.UTC(sY, sM - 1, sD)) / (1000 * 3600 * 24)) + 1;
         await updateEmployeeLeaveBalance(r.employeeId, r.leaveType, daysTaken);
       }
     }
@@ -1326,7 +1311,6 @@ const App: React.FC = () => {
         if (nextLevelConfig) notifyApprovers(r.employeeId, nextLevelConfig.roleId, `Pending Resignation Review`, AppView.ADMIN_PORTAL_RESIGNATION_MANAGEMENT);
       } else {
         updatedRequest.status = RequestStatus.APPROVED;
-        await updateResignationRequest(updatedRequest);
 
         const relievingDateObj = new Date(updatedRequest.relievingDate);
         const today = new Date();
@@ -1334,17 +1318,31 @@ const App: React.FC = () => {
 
         if (relievingDateObj <= today) {
           await relieveEmployee(r.employeeId, updatedRequest.relievingDate, 'Resignation');
+          updatedRequest.isProcessed = true;
           logSystemAction('APPROVAL', 'EMPLOYEES', `Final approval & relieved resignation of ${r.employeeName}.`);
         } else {
-          // Future relieving date: approval recorded while allowing employee to serve notice period actively
+          // Future relieving date: record notice period on employee while keeping them active until relieving date
+          await setEmployeeNoticePeriod(r.employeeId, updatedRequest.relievingDate, updatedRequest.reason || 'Resignation');
+          updatedRequest.isProcessed = false;
           logSystemAction('APPROVAL', 'EMPLOYEES', `Final approval for resignation of ${r.employeeName}. Notice serving until ${new Date(updatedRequest.relievingDate).toLocaleDateString()}.`);
         }
 
+        await updateResignationRequest(updatedRequest);
         sendNotification(r.employeeId, `Your resignation request has been accepted. Relieving Date: ${new Date(updatedRequest.relievingDate).toLocaleDateString()}`, 'success', AppView.EMPLOYEE_RESIGNATION);
       }
     }
     refreshGlobalStats();
   }, [resignationRequests, authUser, workflowConfigs, roles, logSystemAction, sendNotification, notifyApprovers, refreshGlobalStats, sites, staffUsers]);
+
+  // Automatically relieve employees whose approved notice period has concluded
+  useEffect(() => {
+    if (!authUser || (authUser as any).type !== 'Admin') return;
+    if (resignationRequests && resignationRequests.length > 0) {
+      processDueResignations(resignationRequests).catch(err => {
+        console.warn('[AutoRelieve] Failed to process due resignations:', err);
+      });
+    }
+  }, [resignationRequests, authUser]);
 
   const handleSubmitAccountUpdateRequest = useCallback(async (requestData: any) => {
     if (checkWritesBlock()) return;
@@ -1820,9 +1818,9 @@ const App: React.FC = () => {
       if (moduleId === 'LEAVES') {
         const req = leaveRequests.find(r => r.id === requestId);
         if (req && req.status === RequestStatus.APPROVED) {
-          const startDate = new Date(req.startDate);
-          const endDate = new Date(req.endDate);
-          const daysTaken = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24)) + 1;
+          const [sY, sM, sD] = req.startDate.split('-').map(Number);
+          const [eY, eM, eD] = req.endDate.split('-').map(Number);
+          const daysTaken = Math.round((Date.UTC(eY, eM - 1, eD) - Date.UTC(sY, sM - 1, sD)) / (1000 * 3600 * 24)) + 1;
           const { updateEmployeeLeaveBalance } = await import('./src/services/employeeService');
           await updateEmployeeLeaveBalance(req.employeeId, req.leaveType, -daysTaken);
         }
@@ -1851,9 +1849,9 @@ const App: React.FC = () => {
         if (moduleId === 'LEAVES') {
           const req = leaveRequests.find(r => r.id === requestId);
           if (req && req.status === RequestStatus.APPROVED) {
-            const startDate = new Date(req.startDate);
-            const endDate = new Date(req.endDate);
-            const daysTaken = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24)) + 1;
+            const [sY, sM, sD] = req.startDate.split('-').map(Number);
+            const [eY, eM, eD] = req.endDate.split('-').map(Number);
+            const daysTaken = Math.round((Date.UTC(eY, eM - 1, eD) - Date.UTC(sY, sM - 1, sD)) / (1000 * 3600 * 24)) + 1;
             const { updateEmployeeLeaveBalance } = await import('./src/services/employeeService');
             await updateEmployeeLeaveBalance(req.employeeId, req.leaveType, -daysTaken);
           }
@@ -2033,9 +2031,11 @@ const App: React.FC = () => {
   const handleApproveProfileCompletion = useCallback(async (employeeId: string) => {
     try {
       const { db } = await import('./src/firebase/config');
-      const { doc, updateDoc, getDoc } = await import('firebase/firestore');
+      const { doc, updateDoc, getDoc, writeBatch } = await import('firebase/firestore');
+      const { resolveEmployeeDoc } = await import('./src/services/employeeService');
 
-      const empRef = doc(db, 'employees', employeeId);
+      const resolved = await resolveEmployeeDoc(employeeId);
+      const empRef = resolved ? resolved.ref : doc(db, 'employees', employeeId);
 
       const subId = await findSubmissionIdByEmployeeId(employeeId);
       if (subId) {
@@ -2066,7 +2066,7 @@ const App: React.FC = () => {
         // Read active employee record to update dynamic storage paths
         const empSnap = await getDoc(empRef);
         if (empSnap.exists()) {
-          const empData = empSnap.data();
+          const empData = empSnap.data() as any;
           const rewriteStoragePaths = (obj: any, oldPrefix: string, newPrefix: string): any => {
             if (!obj) return obj;
             if (typeof obj !== 'object') return obj;
@@ -2098,13 +2098,14 @@ const App: React.FC = () => {
           }
         }
 
-        await updateDoc(empRef, updateData);
-
-        await updateDoc(subRef, {
+        const batch = writeBatch(db);
+        batch.update(empRef, updateData);
+        batch.update(subRef, {
           needsProfileCompletion: false,
           profileStatus: 'approved',
           lastUpdated: new Date().toISOString()
         });
+        await batch.commit();
       } else {
         await updateDoc(empRef, {
           needsProfileCompletion: false,
@@ -2136,10 +2137,10 @@ const App: React.FC = () => {
 
           // Also update the employee record if approved
           if (data.employeeId) {
-            const empRef = doc(db, 'employees', data.employeeId);
-            const empSnap = await getDoc(empRef);
-            if (empSnap.exists()) {
-              await updateDoc(empRef, { approvalHistory: history });
+            const { resolveEmployeeDoc } = await import('./src/services/employeeService');
+            const resolved = await resolveEmployeeDoc(data.employeeId);
+            if (resolved) {
+              await updateDoc(resolved.ref, { approvalHistory: history });
             }
           }
           logSystemAction('UPDATE', 'SUBMISSION', `Updated review comment at step ${historyIndex} from "${oldComment || ''}" to "${newComment}"`);
@@ -2291,8 +2292,10 @@ const App: React.FC = () => {
       const { db } = await import('./src/firebase/config');
       const { doc, updateDoc } = await import('firebase/firestore');
 
-      const userUniqueId = authUser.portalId || authUser.id;
-      const empRef = doc(db, 'employees', userUniqueId);
+      const userUniqueId = authUser.portalId || authUser.id || authUser.employeeId;
+      const { resolveEmployeeDoc } = await import('./src/services/employeeService');
+      const resolved = await resolveEmployeeDoc(userUniqueId);
+      const empRef = resolved ? resolved.ref : doc(db, 'employees', userUniqueId);
       const requiresAdminApproval = (employeeData as any).importedVia === 'pending_profile_import';
 
       const employeePayload: any = {
@@ -2356,10 +2359,19 @@ const App: React.FC = () => {
     onLogout: handleLogout,
     onLoginSuccess: async (emp: any) => {
       const name = emp.applicantName || emp.name || getApplicantName(emp.data, emp.originalFormSections) || emp.employeeId;
-      const employeeUser = { type: UserType.EMPLOYEE, id: emp.id!, employeeId: emp.employeeId, name };
+      const employeeUser = {
+        type: UserType.EMPLOYEE,
+        id: emp.id!,
+        employeeId: emp.employeeId,
+        portalId: emp.portalId || emp.submissionId || emp.id,
+        isDefaultPassword: emp.isDefaultPassword || false,
+        authProvider: emp.authProvider || 'manual',
+        linkedGoogleEmail: emp.linkedGoogleEmail,
+        name
+      };
       setAuthUser(employeeUser);
       await logSystemAction('LOGIN', 'AUTH', `Employee logged in: ${name} (${emp.employeeId})`, employeeUser);
-      const balance = leaveBalances.find(b => b.employeeId === emp.employeeId);
+      const balance = leaveBalances.find(b => b.employeeId === emp.employeeId || b.employeeId === employeeUser.portalId);
       const redirectPath = new URLSearchParams(window.location.search).get('redirect');
       if (redirectPath) {
         navigate(redirectPath);
@@ -2369,9 +2381,9 @@ const App: React.FC = () => {
     },
     authUser: authUser,
     employeeData: employeeData,
-    leaveRequests: leaveRequests.filter(lr => lr.employeeId === authUser?.id || (authUser?.employeeId && lr.employeeId === authUser.employeeId)),
-    accountUpdateRequests: accountUpdateRequests.filter(aur => aur.employeeId === authUser?.id || (authUser?.employeeId && aur.employeeId === authUser.employeeId)),
-    resignationRequests: resignationRequests.filter(r => r.employeeId === authUser?.id || (authUser?.employeeId && r.employeeId === authUser.employeeId)),
+    leaveRequests: leaveRequests.filter(lr => lr.employeeId === authUser?.id || (authUser?.employeeId && lr.employeeId === authUser.employeeId) || (authUser?.portalId && lr.employeeId === authUser.portalId)),
+    accountUpdateRequests: accountUpdateRequests.filter(aur => aur.employeeId === authUser?.id || (authUser?.employeeId && aur.employeeId === authUser.employeeId) || (authUser?.portalId && aur.employeeId === authUser.portalId)),
+    resignationRequests: resignationRequests.filter(r => r.employeeId === authUser?.id || (authUser?.employeeId && r.employeeId === authUser.employeeId) || (authUser?.portalId && r.employeeId === authUser.portalId)),
     onSubmitLeaveRequest: handleSubmitLeaveRequest,
     onSubmitAccountUpdateRequest: handleSubmitAccountUpdateRequest,
     onSubmitResignationRequest: handleSubmitResignationRequest,
@@ -2381,8 +2393,8 @@ const App: React.FC = () => {
     editableFieldIds: editableFieldIds,
     roles: roles,
     workflowConfigs: workflowConfigs,
-    leaveBalances: leaveBalances.filter(b => b.employeeId === authUser?.id || (authUser?.employeeId && b.employeeId === authUser.employeeId)),
-    disciplinaryActions: disciplinaryActions.filter(d => d.employeeId === authUser?.id || (authUser?.employeeId && d.employeeId === authUser.employeeId)),
+    leaveBalances: leaveBalances.filter(b => b.employeeId === authUser?.id || (authUser?.employeeId && b.employeeId === authUser.employeeId) || (authUser?.portalId && b.employeeId === authUser.portalId)),
+    disciplinaryActions: disciplinaryActions.filter(d => d.employeeId === authUser?.id || (authUser?.employeeId && d.employeeId === authUser.employeeId) || (authUser?.portalId && d.employeeId === authUser.portalId)),
     leavePolicy: leavePolicy,
     portalConfig: portalConfig,
     sites: sites, // Added this

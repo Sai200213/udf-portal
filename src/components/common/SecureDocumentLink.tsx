@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getSecureURL } from '../../services/storageService';
+import { getSecureURL, revokeSecureURL } from '../../services/storageService';
 import { Loader2, XCircle, FileText, ImageIcon } from 'lucide-react';
 
 interface SecureDocumentLinkProps {
@@ -42,6 +42,12 @@ const SecureDocumentLink: React.FC<SecureDocumentLinkProps> = ({
       const resolvedUrl = await getSecureURL(path);
       if (resolvedUrl && isSafeUrl(resolvedUrl)) {
         window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+        // Revoke temporary blob URL after 60s so new tab has rendered it without permanently leaking memory
+        if (resolvedUrl.startsWith('blob:')) {
+          setTimeout(() => {
+            revokeSecureURL(resolvedUrl);
+          }, 60000);
+        }
       } else {
         alert("Document URL could not be resolved or is invalid.");
       }
@@ -105,6 +111,8 @@ export const SecureImage: React.FC<SecureImageProps> = ({ path: rawPath, classNa
 
   useEffect(() => {
     let isMounted = true;
+    let blobUrlToRevoke: string | null = null;
+
     if (!path) {
       if (isMounted) setUrl(null);
       return;
@@ -115,14 +123,27 @@ export const SecureImage: React.FC<SecureImageProps> = ({ path: rawPath, classNa
     } else {
       getSecureURL(path)
         .then(signedUrl => {
-          if (isMounted) setUrl(signedUrl);
+          if (isMounted) {
+            setUrl(signedUrl);
+            if (signedUrl && signedUrl.startsWith('blob:')) {
+              blobUrlToRevoke = signedUrl;
+            }
+          } else {
+            revokeSecureURL(signedUrl);
+          }
         })
         .catch(err => {
           console.error("Failed to fetch secure image", err);
           if (isMounted) setUrl(null);
         });
     }
-    return () => { isMounted = false; };
+
+    return () => { 
+      isMounted = false; 
+      if (blobUrlToRevoke) {
+        revokeSecureURL(blobUrlToRevoke);
+      }
+    };
   }, [path]);
 
   if (!url) {

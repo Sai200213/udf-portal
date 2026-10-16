@@ -156,7 +156,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const leaveBalances = useMemo<LeaveBalance[]>(() => {
         return employees.map(emp => {
-            const empLeaves = leaveRequests.filter(r => r.employeeId === emp.employeeId && r.status === 'Approved');
+            const validIds = [emp.id, emp.employeeId, (emp as any).portalId, (emp as any).submissionId].filter(Boolean);
+            const empLeaves = leaveRequests.filter(r => validIds.includes(r.employeeId) && r.status === 'Approved');
             
             const policyBalances: Record<string, { total: number; used: number }> = {};
             if (leavePolicy && leavePolicy.leaveTypes) {
@@ -188,12 +189,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 if (!policyBalances[leaveLabel]) {
                     policyBalances[leaveLabel] = { total: 0, used: 0 };
                 }
-                const start = new Date(req.startDate);
-                const end = new Date(req.endDate);
-                const startUTC = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-                const endUTC = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+                const [sY, sM, sD] = req.startDate.split('-').map(Number);
+                const [eY, eM, eD] = req.endDate.split('-').map(Number);
+                const startUTC = Date.UTC(sY, sM - 1, sD);
+                const endUTC = Date.UTC(eY, eM - 1, eD);
                 const days = Math.round((endUTC - startUTC) / (1000 * 3600 * 24)) + 1;
-                policyBalances[leaveLabel].used += days;
+                policyBalances[leaveLabel].used += Math.max(0, days);
+            });
+
+            // IMPORTANT: Since emp.leaveBalance stores the remaining balance in Firestore,
+            // total entitlement is remaining + used, so that (total - used) in EmployeeLeaveRequestPage correctly equals the remaining balance!
+            Object.keys(policyBalances).forEach(label => {
+                policyBalances[label].total = policyBalances[label].total + policyBalances[label].used;
             });
 
             return {
@@ -249,7 +256,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!user) return false;
         if (isSuperAdmin) return true;
         if (userRoleObj?.isDisabled === true) return false;
-        return (user as any)?.permissionOverrides?.[p] === true || userRoleObj?.permissions.includes(p) || false;
+        const overrides = (user as any)?.permissionOverrides;
+        if (overrides && overrides[p] !== undefined) {
+            return Boolean(overrides[p]);
+        }
+        return Boolean(userRoleObj?.permissions?.includes(p));
     }, [user, isSuperAdmin, userRoleObj]);
 
     const scopedLeaveRequests = useMemo(() => {
@@ -317,8 +328,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const { getGlobalStats, getDashboardAnalytics } = await import('../services/employeeService');
 
             const userRoleObj = roles.find(r => r.id === (user as any)?.roleId);
-            const isSuper = (user as any)?.roleId === 'role-super-admin' || user?.id === 'super-admin';
-            const hasPermission = (p: Permission) => isSuper || (userRoleObj?.isDisabled !== true && ((user as any)?.permissionOverrides?.[p] === true || userRoleObj?.permissions.includes(p)));
+            const isSuper = (user as any)?.roleId === 'role-super-admin' || user?.id === 'super-admin' || isSuperAdmin;
+            const hasPermission = (p: Permission) => {
+                if (isSuper) return true;
+                if (userRoleObj?.isDisabled === true) return false;
+                const overrides = (user as any)?.permissionOverrides;
+                if (overrides && overrides[p] !== undefined) {
+                    return Boolean(overrides[p]);
+                }
+                return Boolean(userRoleObj?.permissions?.includes(p));
+            };
             const hasViewScopeAll = isSuper || hasPermission(Permission.SUBMISSIONS_VIEW_SCOPE_ALL);
 
             // For non-super-admins and site-restricted staff, filter stats by their assigned sites
@@ -395,6 +414,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         let unsubDrafts = () => { };
         let unsubResignations = () => { };
         let unsubEmployees = () => { };
+        let unsubFallbackEmp = () => { };
         let unsubSubmissions = () => { };
         let unsubLeaves = () => { };
         let unsubAccountUpdates = () => { };
@@ -424,16 +444,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const empQuery = query(collection(db, 'employees'), where('employeeId', '==', employeeId));
                 unsubEmployees = onSnapshot(empQuery, (snap) => {
                     if (!snap.empty) {
+                        unsubFallbackEmp();
+                        unsubFallbackEmp = () => { };
                         const docSnap = snap.docs[0];
                         setEmployees([{ id: docSnap.id, ...docSnap.data() } as unknown as FirestoreEmployee]);
                     } else {
-                        subscribeToEmployeeByUid(firebaseUid || user.id, (emp) => {
+                        unsubFallbackEmp();
+                        unsubFallbackEmp = subscribeToEmployeeByUid(firebaseUid || user.id, (emp) => {
                             if (emp) setEmployees([emp]);
                         });
                     }
                 }, (error) => {
                     log.log('[DataContext] employeeId query error, trying UID fallback');
-                    subscribeToEmployeeByUid(firebaseUid || user.id, (emp) => {
+                    unsubFallbackEmp();
+                    unsubFallbackEmp = subscribeToEmployeeByUid(firebaseUid || user.id, (emp) => {
                         if (emp) setEmployees([emp]);
                     });
                 });
@@ -491,6 +515,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             unsubDrafts();
             unsubResignations();
             unsubEmployees();
+            unsubFallbackEmp();
             unsubSubmissions();
             unsubLeaves();
             unsubAccountUpdates();
@@ -561,7 +586,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             const userRoleObj = roles.find(r => r.id === (user as any)?.roleId);
             const isSuperAdmin = (user as any)?.roleId === 'role-super-admin' || user?.id === 'super-admin';
-            const hasPermission = (p: Permission) => isSuperAdmin || (userRoleObj?.isDisabled !== true && ((user as any)?.permissionOverrides?.[p] === true || userRoleObj?.permissions.includes(p)));
+            const hasPermission = (p: Permission) => {
+                if (isSuperAdmin) return true;
+                if (userRoleObj?.isDisabled === true) return false;
+                const overrides = (user as any)?.permissionOverrides;
+                if (overrides && overrides[p] !== undefined) {
+                    return Boolean(overrides[p]);
+                }
+                return Boolean(userRoleObj?.permissions?.includes(p));
+            };
 
             // Leave Requests
             const hasLeavesPerm = hasPermission(Permission.VIEW_LEAVES) || hasPermission(Permission.MANAGE_LEAVES);

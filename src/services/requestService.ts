@@ -176,6 +176,30 @@ export const updateResignationRequest = async (request: ResignationRequest) => {
     await logSystemAction(action, 'EMPLOYEES', `Resignation request for ${request.employeeName} (${request.employeeId}) updated to ${request.status} (relieving: ${request.relievingDate})`);
 };
 
+// Auto-relieve employees whose notice period has concluded
+export const processDueResignations = async (requests: ResignationRequest[]): Promise<void> => {
+    if (!requests || requests.length === 0) return;
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    const { relieveEmployee } = await import('./employeeService');
+
+    for (const req of requests) {
+        if (req.status === 'Approved' && !req.isProcessed && req.relievingDate) {
+            const relDate = new Date(req.relievingDate);
+            if (!isNaN(relDate.getTime()) && relDate <= today) {
+                try {
+                    await relieveEmployee(req.employeeId, req.relievingDate, 'Resignation');
+                    await setDoc(doc(db, RESIGNATION_COL, req.id), { isProcessed: true }, { merge: true });
+                    log.log(`[AutoRelieve] Relieved ${req.employeeId} (${req.employeeName}) on relieving date ${req.relievingDate}`);
+                } catch (e) {
+                    log.error(`[AutoRelieve] Failed to auto-relieve ${req.employeeId}:`, e);
+                }
+            }
+        }
+    }
+};
+
 // --- Disciplinary Actions ---
 export const subscribeToDisciplinaryActions = (callback: (actions: DisciplinaryAction[]) => void) => {
     return onSnapshot(collection(db, DISCIPLINARY_COL), (snap) => {

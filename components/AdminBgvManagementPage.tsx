@@ -83,8 +83,16 @@ export const AdminBgvManagementPage: React.FC<AdminBgvManagementPageProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | BgvStatus>('ALL');
 
   // Granular RBAC Permissions
-  const hasPermission = (p: Permission) => isSuperAdmin || (userRole?.permissions?.includes(p) ?? false);
-  const isVendor = !isSuperAdmin && (userRole?.permissions?.includes(Permission.BGV_VENDOR) ?? false);
+  const hasPermission = (p: Permission) => {
+    if (isSuperAdmin) return true;
+    if (userRole?.isDisabled === true) return false;
+    const overrides = (authUser as any)?.permissionOverrides;
+    if (overrides && overrides[p] !== undefined) {
+      return Boolean(overrides[p]);
+    }
+    return Boolean(userRole?.permissions?.includes(p));
+  };
+  const isVendor = !isSuperAdmin && hasPermission(Permission.BGV_VENDOR);
 
   const canViewDossier = isSuperAdmin || hasPermission(Permission.BGV_VIEW_DOSSIER) || hasPermission(Permission.BGV_MANAGE) || isVendor;
   const canCopyDossier = isSuperAdmin || hasPermission(Permission.BGV_COPY_DOSSIER) || hasPermission(Permission.BGV_MANAGE);

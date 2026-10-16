@@ -98,17 +98,17 @@ const EmployeeLeaveRequestPage: React.FC<EmployeeLeaveRequestPageProps> = ({
       setFormError('Start date and end date are required.');
       return;
     }
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const [sY, sM, sD] = startDate.split('-').map(Number);
+    const [eY, eM, eD] = endDate.split('-').map(Number);
+    const startUTC = Date.UTC(sY, sM - 1, sD);
+    const endUTC = Date.UTC(eY, eM - 1, eD);
 
-    if (start > end) {
+    if (startUTC > endUTC) {
       setFormError('Start date cannot be after end date.');
       return;
     }
 
     // Pure Calendar Day Calculation (start date to end date inclusive count)
-    const startUTC = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-    const endUTC = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
     const daysRequested = Math.round((endUTC - startUTC) / (1000 * 3600 * 24)) + 1; // Inclusive
 
     const balanceInfo = getBalance(leaveType);
