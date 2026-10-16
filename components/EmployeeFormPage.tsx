@@ -780,6 +780,18 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         await loginAnonymously();
         setHasSelectedAuth(true);
         sessionStorage.setItem(SS_HAS_AUTH, 'true');
+
+        if (!savedDraftId) {
+          try {
+            const initialDraftId = await onSaveDraft(formData, 0);
+            if (initialDraftId) {
+              setSavedDraftId(initialDraftId);
+              sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(initialDraftId));
+            }
+          } catch (initErr) {
+            console.warn('[Guest Auth] Initial draft pre-creation warning:', initErr);
+          }
+        }
       } catch (e: any) {
         console.error("Guest Auth Error:", e);
         setAuthError("Guest entry failed. Please try again.");
@@ -895,6 +907,17 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
               sessionStorage.setItem(SS_CURRENT_STEP, '0');
               lastSavedDataRef.current = JSON.stringify({ data: cleanPrefills, step: 0 });
               setWasRestoredFromSession(false);
+
+              // Pre-create initial draft in Firestore so Portal ID is reserved and storage folder exists
+              try {
+                const initialDraftId = await onSaveDraft(cleanPrefills, 0);
+                if (initialDraftId) {
+                  setSavedDraftId(initialDraftId);
+                  sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(initialDraftId));
+                }
+              } catch (initErr) {
+                console.warn('[Google Auth] Initial draft pre-creation warning:', initErr);
+              }
             }
           } catch (cloudErr) {
             console.warn('[Google Auth] Failed to check cloud draft:', cloudErr);

@@ -48,21 +48,30 @@ service firebase.storage {
       );
     }
 
-    function isDraftOwner(draftId) {
-      return firestore.exists(/databases/(default)/documents/draft_submissions/$(draftId)) && (
-        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerUid', '') == request.auth.uid ||
-        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('uid', '') == request.auth.uid ||
-        firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('linkedUid', '') == request.auth.uid ||
-        (
-          firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerEmail', '') != null &&
-          request.auth.token.email != null &&
-          firestore.get(/databases/(default)/documents/draft_submissions/$(draftId)).data.get('ownerEmail', '') == request.auth.token.email
+    function isCandidateDraftOwner(submissionId) {
+      return request.auth.uid == submissionId || (
+        firestore.exists(/databases/(default)/documents/draft_submissions/$(submissionId)) && (
+          firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data.ownerUid == request.auth.uid ||
+          (
+            'uid' in firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data &&
+            firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data.uid == request.auth.uid
+          ) ||
+          (
+            'linkedUid' in firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data &&
+            firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data.linkedUid == request.auth.uid
+          ) ||
+          (
+            request.auth.token.email != null &&
+            'ownerEmail' in firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data &&
+            firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data.ownerEmail != null &&
+            firestore.get(/databases/(default)/documents/draft_submissions/$(submissionId)).data.ownerEmail == request.auth.token.email
+          )
         )
       );
     }
 
     function isOnboardingOwner(submissionId) {
-      return request.auth.uid == submissionId || isEmployeeOwner(submissionId) || isDraftOwner(submissionId);
+      return request.auth.uid == submissionId || isCandidateDraftOwner(submissionId) || isEmployeeOwner(submissionId);
     }
 
     // New unified user-based storage folders
@@ -86,10 +95,10 @@ service firebase.storage {
     // Submission Documents (Joining form uploads)
     match /onboarding/{submissionId} {
       match /{allPaths=**} {
-        allow read: if isAdmin() || isOnboardingOwner(submissionId);
+        allow read: if isAdmin() || isCandidateDraftOwner(submissionId) || isEmployeeOwner(submissionId);
         allow write: if isAuthenticated() && isValidUpload() && (
-          isAdmin() || 
-          isOnboardingOwner(submissionId)
+          isCandidateDraftOwner(submissionId) ||
+          isAdmin()
         );
       }
     }
