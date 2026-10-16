@@ -47,8 +47,8 @@ export const autoCompressFile = async (file: File, options?: FileCompressionOpti
 
     if (file.type.startsWith('image/') && file.type !== 'image/gif') {
         try {
-            // Document scans need high resolution but compressed size (1800px max size, 0.82 quality)
-            const compressed = await compressImage(file, 1800, 0.82);
+            // Document scans need high resolution and crisp quality (2400px max size, 0.90 quality)
+            const compressed = await compressImage(file, 2400, 0.90);
             return compressed;
         } catch (e) {
             console.warn("[STORAGE] Image compression failed, uploading original:", e);

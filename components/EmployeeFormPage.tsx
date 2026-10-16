@@ -357,6 +357,12 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   const [totalStorageSize, setTotalStorageSize] = useState<number>(0);
   const [isDiscarding, setIsDiscarding] = useState<boolean>(false);
   const initialDraftLoadedIdRef = useRef<string | null>(null);
+  const formDataRef = useRef<Record<string, any>>(formData);
+  formDataRef.current = formData;
+  const currentStepRef = useRef<number>(currentStep);
+  currentStepRef.current = currentStep;
+  const savedDraftIdRef = useRef<string | null>(savedDraftId);
+  savedDraftIdRef.current = savedDraftId;
 
   // Extraction Results State
   const [showResults, setShowResults] = useState(false);
@@ -1574,11 +1580,13 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         }
 
         // 1. Upload the unlocked Aadhaar PDF (for document verification & draft persistence)
+        // Skip compression to preserve 100% vector sharpness, clear text, and high quality
         unlockedStoragePath = await uploadSubmissionDocument(
           aadharFrontId,
           unlockedFile,
           undefined,
-          activeDraftId || undefined
+          activeDraftId || undefined,
+          { skipCompression: true }
         );
         updates[aadharFrontId] = unlockedStoragePath;
         updates[aadharBackId] = unlockedStoragePath;
@@ -1799,6 +1807,33 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     } else if (value === null || value === undefined || value === '') {
       // File was cleared — remove from IndexedDB too
       removeFileFromSession(fieldId);
+      // If a previously synced cloud document is removed, sync deletion to Firestore draft immediately
+      if (formDataRef.current[fieldId] && typeof formDataRef.current[fieldId] === 'string' && formDataRef.current[fieldId].startsWith('onboarding/')) {
+        const updated = { ...formDataRef.current };
+        delete updated[fieldId];
+        onSaveDraft(updated, currentStepRef.current, savedDraftIdRef.current || undefined).then((draftId) => {
+          if (draftId) {
+            setSavedDraftId(draftId);
+            lastSavedDataRef.current = JSON.stringify({ data: updated, step: currentStepRef.current });
+          }
+        }).catch((err) => {
+          console.warn('[AutoSave] Document deletion sync warning:', err);
+        });
+      }
+    } else if (typeof value === 'string' && value.startsWith('onboarding/')) {
+      // Document upload completed: Immediately persist to Firestore cloud draft without waiting for 'Next' button
+      const updated = { ...formDataRef.current, [fieldId]: value };
+      onSaveDraft(updated, currentStepRef.current, savedDraftIdRef.current || undefined).then((draftId) => {
+        if (draftId) {
+          setSavedDraftId(draftId);
+          lastSavedDataRef.current = JSON.stringify({ data: updated, step: currentStepRef.current });
+          sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
+          localStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
+          toast.success('Document saved to cloud draft!', { duration: 2500, id: `draft-save-${fieldId}` });
+        }
+      }).catch((err) => {
+        console.warn('[AutoSave] Document draft sync warning:', err);
+      });
     }
 
     // Instant Validation
@@ -1816,7 +1851,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         return newErrors;
       });
     }
-  }, [activeSections, validateSingleField, SITE_FIELD_ID, SUBUNIT_FIELD_ID, isSiteField, isDesignationField, isSubunitField]);
+  }, [activeSections, validateSingleField, SITE_FIELD_ID, SUBUNIT_FIELD_ID, isSiteField, isDesignationField, isSubunitField, onSaveDraft]);
 
   const validateStepFields = useCallback((stepIndex: number): boolean => {
     const errors: Record<string, string> = {};

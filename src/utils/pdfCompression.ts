@@ -22,11 +22,11 @@ const dataUrlToUint8Array = (dataUrl: string): Uint8Array => {
 };
 
 export interface PdfCompressionOptions {
-    /** Target maximum dimension (width or height) in pixels. Default: 1600 (ideal for A4 document scans) */
+    /** Target maximum dimension (width or height) in pixels. Default: 2400 (ideal for crisp document scans) */
     maxDimension?: number;
-    /** JPEG quality for image pages (0.1 to 1.0). Default: 0.78 */
+    /** JPEG quality for image pages (0.1 to 1.0). Default: 0.92 */
     quality?: number;
-    /** Only compress if file is larger than this byte threshold. Default: 500 KB */
+    /** Only compress if file is larger than this byte threshold. Default: 2.5 MB */
     minSizeToCompress?: number;
     /** Optional password to decrypt and compress password-protected PDFs */
     password?: string;
@@ -35,16 +35,17 @@ export interface PdfCompressionOptions {
 /**
  * Compresses a PDF file entirely in the browser before upload.
  * - Handles both text/vector PDFs and large camera/scanner image PDFs.
- * - Shrinks 5MB-20MB camera scans down to 300KB-600KB with crisp, readable text.
+ * - Shrinks massive multi-megabyte camera scans while preserving razor-sharp text.
+ * - Skips compression for normal-sized PDFs (<2.5MB) to keep 100% original crisp vector clarity.
  * - Falls back to the original file gracefully if anything fails.
  */
 export const compressPdf = async (
     file: File,
     options?: PdfCompressionOptions
 ): Promise<File> => {
-    const minSize = options?.minSizeToCompress ?? 500 * 1024; // 500 KB
+    const minSize = options?.minSizeToCompress ?? 2.5 * 1024 * 1024; // 2.5 MB
     if (file.size <= minSize) {
-        console.log(`[PDF_COMPRESS] File is already small (${(file.size / 1024).toFixed(1)} KB), skipping.`);
+        console.log(`[PDF_COMPRESS] File is already within reasonable size (${(file.size / 1024).toFixed(1)} KB), skipping to preserve 100% original vector sharpness.`);
         return file;
     }
 
@@ -67,15 +68,15 @@ export const compressPdf = async (
         const pageCount = sourcePdfDoc.getPageCount();
         if (pageCount === 0) return file;
 
-        // 2. Render each page using pdfjs-dist and repackage with optimized JPEG encoding
+        // 2. Render each page using pdfjs-dist and repackage with optimized high-quality JPEG encoding
         const loadingTask = pdfjsLib.getDocument({
             data: new Uint8Array(fileBuffer),
             password: options?.password || undefined,
         });
         const pdfJsDoc = await loadingTask.promise;
 
-        const maxDim = options?.maxDimension ?? 1600;
-        const quality = options?.quality ?? 0.78;
+        const maxDim = options?.maxDimension ?? 2400;
+        const quality = options?.quality ?? 0.92;
 
         const outputPdf = await PDFDocument.create();
 
@@ -83,9 +84,9 @@ export const compressPdf = async (
             const page = await pdfJsDoc.getPage(i);
             const unscaledViewport = page.getViewport({ scale: 1.0 });
 
-            // Calculate scale: fit maxDim while retaining aspect ratio
+            // Calculate scale: fit maxDim while retaining aspect ratio; minimum 2.0x supersampling for razor-sharp text
             const currentMax = Math.max(unscaledViewport.width, unscaledViewport.height);
-            const scale = currentMax > maxDim ? maxDim / currentMax : 1.2; // 1.2 scale ensures crispness if originally small
+            const scale = currentMax > maxDim ? maxDim / currentMax : 2.0;
 
             const viewport = page.getViewport({ scale });
 

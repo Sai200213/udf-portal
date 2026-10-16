@@ -14,16 +14,24 @@ const DB_VERSION = 1;
 
 // --- Crypto Utils ---
 async function getOrGenerateKey(): Promise<CryptoKey> {
-  let keyStr = sessionStorage.getItem('__fs_key');
+  let keyStr = sessionStorage.getItem('__fs_key') || localStorage.getItem('__fs_key');
   let rawKey: Uint8Array;
   
   if (keyStr) {
-    const binString = atob(keyStr);
-    rawKey = Uint8Array.from(binString, (m) => m.codePointAt(0)!);
-  } else {
+    try {
+      const binString = atob(keyStr);
+      rawKey = Uint8Array.from(binString, (m) => m.codePointAt(0)!);
+    } catch {
+      keyStr = null;
+    }
+  }
+  
+  if (!keyStr) {
     rawKey = window.crypto.getRandomValues(new Uint8Array(32));
     const binString = Array.from(rawKey, (byte) => String.fromCodePoint(byte)).join("");
-    sessionStorage.setItem('__fs_key', btoa(binString));
+    const encoded = btoa(binString);
+    sessionStorage.setItem('__fs_key', encoded);
+    localStorage.setItem('__fs_key', encoded);
   }
   
   return await window.crypto.subtle.importKey(
@@ -196,17 +204,21 @@ export async function getAllFilesFromSession(): Promise<Record<string, File>> {
       const key = keys[i];
       const result = results[i];
       if (result) {
-        let decryptedBuffer: ArrayBuffer;
-        if (result.iv) {
-          decryptedBuffer = await decryptBuffer(result.buffer, result.iv);
-        } else {
-          decryptedBuffer = result.buffer; // Legacy fallback
+        try {
+          let decryptedBuffer: ArrayBuffer;
+          if (result.iv) {
+            decryptedBuffer = await decryptBuffer(result.buffer, result.iv);
+          } else {
+            decryptedBuffer = result.buffer; // Legacy fallback
+          }
+          
+          files[String(key)] = new File([decryptedBuffer], result.name, {
+            type: result.type,
+            lastModified: result.lastModified,
+          });
+        } catch {
+          // If decryption fails for an orphaned/stale record, skip it silently
         }
-        
-        files[String(key)] = new File([decryptedBuffer], result.name, {
-          type: result.type,
-          lastModified: result.lastModified,
-        });
       }
     }
   } catch (e) {
@@ -218,6 +230,8 @@ export async function getAllFilesFromSession(): Promise<Record<string, File>> {
 /** Clear all stored files (call on successful submission or exit) */
 export async function clearFileSession(): Promise<void> {
   try {
+    sessionStorage.removeItem('__fs_key');
+    localStorage.removeItem('__fs_key');
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).clear();
