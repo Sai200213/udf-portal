@@ -123,9 +123,8 @@ const PERMISSION_MODULES: PermissionModule[] = [
     name: 'Disciplinary Warnings',
     description: 'Manage and file verbal/written warnings, suspensions, show-cause notices, and disciplinary records.',
     viewPermission: Permission.DISCIPLINE_VIEW,
-    readOnlyOptions: [
-      { key: Permission.DISCIPLINE_VIEW_SCOPE_ALL, label: 'View All Disciplinary Warnings', explanation: 'Allows viewing guard warning logs across all company sites.' }
-    ],
+    scopeAllPermission: Permission.DISCIPLINE_VIEW_SCOPE_ALL,
+    readOnlyOptions: [],
     decisionOptions: [
       { key: Permission.DISCIPLINE_MANAGE, label: 'File Warnings', explanation: 'Allows filing verbal/written warnings, suspensions, or show-cause notices.' },
       { key: Permission.DISCIPLINE_DELETE, label: 'Delete Warnings', explanation: 'Allows removing disciplinary records from employee files.' }
@@ -986,12 +985,15 @@ const AdminRoleManagementPage: React.FC<AdminRoleManagementPageProps> = ({
           }
         >
           <div className="space-y-6 overflow-y-auto max-h-[70vh] pr-2">
-            <Input
-              label="Role Name"
-              value={editingRole.name}
-              onChange={e => setEditingRole({ ...editingRole, name: e.target.value })}
-              autoFocus
-            />
+            <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <div>
+                <span className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">Role</span>
+                <span className="text-sm font-bold text-gray-900">{editingRole.name}</span>
+              </div>
+              <span className="text-xs font-mono text-gray-500 bg-white px-2.5 py-1 rounded border border-gray-200">
+                {editingRole.id}
+              </span>
+            </div>
 
             <div className="space-y-6">
               <p className="text-[11px] text-gray-500 italic">

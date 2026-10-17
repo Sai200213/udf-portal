@@ -72,6 +72,7 @@ const AdminDisciplinaryPage: React.FC<AdminDisciplinaryPageProps> = ({
 
     const empInfo = employeeLookup[selectedEmployeeId];
     const employeeName = empInfo ? empInfo.name : 'Unknown';
+    const siteId = (empInfo as any)?.siteId || undefined;
 
     onAddDiscipline({
       employeeId: selectedEmployeeId,
@@ -79,6 +80,7 @@ const AdminDisciplinaryPage: React.FC<AdminDisciplinaryPageProps> = ({
       actionType,
       date: incidentDate,
       description,
+      siteId,
       document: supportingDoc || undefined
     });
 
@@ -101,7 +103,12 @@ const AdminDisciplinaryPage: React.FC<AdminDisciplinaryPageProps> = ({
     }
   };
 
+  const hasDisciplineScopeAll = isSuperAdmin || userRole?.permissions.includes(Permission.DISCIPLINE_VIEW_SCOPE_ALL);
+
   const filteredActions = disciplinaryActions.filter(action => {
+    if (!hasDisciplineScopeAll && allowedSiteIds && allowedSiteIds.length > 0) {
+      if (action.siteId && !allowedSiteIds.includes(action.siteId)) return false;
+    }
     const matchesSearch = action.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       action.employeeId.toLowerCase().includes(searchTerm.toLowerCase());
 

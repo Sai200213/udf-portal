@@ -3957,7 +3957,7 @@ export const getEmployeeLookupMap = async (formSections: FormSection[], allowedS
     const unitFieldId = unitField?.id;
 
     const snapshot = await getDocs(collection(db, EMPLOYEES_COLLECTION));
-    const lookup: Record<string, { name: string, siteName: string, id: string }> = {};
+    const lookup: Record<string, { name: string, siteName: string, id: string, siteId?: string }> = {};
 
     snapshot.docs.forEach(doc => {
         const data = doc.data() as any;
@@ -3974,7 +3974,8 @@ export const getEmployeeLookupMap = async (formSections: FormSection[], allowedS
         lookup[empId] = {
             id: doc.id,
             name: data.applicantName || 'Unknown',
-            siteName: data.siteName || (unitFieldId ? (data.data?.[unitFieldId] || '') : '')
+            siteName: data.siteName || (unitFieldId ? (data.data?.[unitFieldId] || '') : ''),
+            siteId: data.currentSiteId || data.siteId || ''
         };
     });
 

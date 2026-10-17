@@ -292,7 +292,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, [resignationRequests, allowedSiteIds, isSuperAdmin, hasPermission]);
 
     const scopedDisciplinaryActions = useMemo(() => {
-        if (isSuperAdmin || hasPermission(Permission.EMPLOYEES_VIEW_SCOPE_ALL)) return disciplinaryActions;
+        if (isSuperAdmin || hasPermission(Permission.DISCIPLINE_VIEW_SCOPE_ALL)) return disciplinaryActions;
         if (!allowedSiteIds || allowedSiteIds.length === 0) return [];
         return disciplinaryActions.filter(r => allowedSiteIds.includes(r.siteId || ''));
     }, [disciplinaryActions, allowedSiteIds, isSuperAdmin, hasPermission]);
