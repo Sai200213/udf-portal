@@ -303,6 +303,9 @@ const App: React.FC = () => {
     leavePolicy,
     portalConfig,
     allowedSiteIds,
+    isRolesLoaded,
+    isSitesLoaded,
+    isStaffLoaded,
     setRoles,
     setStaffUsers,
     setWorkflowConfigs,
@@ -374,13 +377,38 @@ const App: React.FC = () => {
     markAllNotificationsAsRead
   } = useNotifications();
 
-  // Auth State Listener - Now fully driven by AuthContext
+  // Hydration Gate: Hold loading state until real permissions and site scoping arrive from Firestore
   useEffect(() => {
-    if (!authLoading) {
-      setIsLoading(false); // Auth is the primary initialization bottleneck
+    if (authLoading) return;
+
+    // Unauthenticated visitors, Guests, or Employees don't require staff/roles hydration
+    if (!authUser || authUser.type === UserType.EMPLOYEE) {
+      setIsLoading(false);
+      return;
     }
-    // Note: View management is now handled by AppRoutes and manual navigation
-  }, [authLoading]);
+
+    // Super Admin bypasses roles and only needs sites loaded
+    if (isSuperAdmin) {
+      if (isSitesLoaded) {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // Management / Staff accounts (HR Manager, Field Officer, Manager, etc.)
+    // Wait until real roles, sites, and staff are loaded so zero flickers occur
+    if (isRolesLoaded && isSitesLoaded && isStaffLoaded) {
+      setIsLoading(false);
+    }
+  }, [authLoading, authUser, isSuperAdmin, isRolesLoaded, isSitesLoaded, isStaffLoaded]);
+
+  // Safety fallback: Never keep user stuck on loading screen longer than 4s if network is slow/offline
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const testConnectivity = useCallback(async () => {
     const domains = {
@@ -758,9 +786,11 @@ const App: React.FC = () => {
 
           const { logoutUser: logout } = await import('./src/services/authService');
           await logout();
+          setIsLoading(false);
         }
       } else {
         setAdminLoginError('Authentication failed to establish a session.');
+        setIsLoading(false);
       }
     } catch (error: any) {
       log.error("Login failed", error);
@@ -770,8 +800,8 @@ const App: React.FC = () => {
             error.code === 'auth/invalid-credential' ? 'Invalid credentials (email or password).' :
               `Login failed (${error.code}). Please try again.`;
       setAdminLoginError(msg);
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleGoogleLogin = async () => {
@@ -809,18 +839,19 @@ const App: React.FC = () => {
 
           const { logoutUser: logout } = await import('./src/services/authService');
           await logout();
+          setIsLoading(false);
         }
       } else {
         setAdminLoginError('Google sign-in returned no user session.');
+        setIsLoading(false);
       }
     } catch (error: any) {
       log.error("App.tsx: Google login error:", error);
       if (error.code !== 'auth/popup-closed-by-user') {
         setAdminLoginError(`Google login failed: ${error.message}`);
       }
+      setIsLoading(false);
     }
-    setIsLoading(false);
-    log.log("App.tsx: handleGoogleLogin finished, isLoading set to false");
   };
 
   const navigateTo = useCallback((view: AppView) => {

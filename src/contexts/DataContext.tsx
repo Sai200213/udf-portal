@@ -107,6 +107,11 @@ interface DataContextType {
     setLeavePolicy: React.Dispatch<React.SetStateAction<LeavePolicy | null>>;
     setPortalConfig: React.Dispatch<React.SetStateAction<PortalConfig | null>>;
 
+    // Hydration Status
+    isRolesLoaded: boolean;
+    isSitesLoaded: boolean;
+    isStaffLoaded: boolean;
+
     // Stats
     stats: {
         pendingSubmissions: number;
@@ -142,6 +147,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const [editableFieldIds, setEditableFieldIds] = useState<string[]>(defaultEditableFields);
     const [leavePolicy, setLeavePolicy] = useState<LeavePolicy | null>(defaultLeavePolicy);
     const [portalConfig, setPortalConfig] = useState<PortalConfig | null>(defaultPortalConfig);
+
+    // Hydration tracking for clean rendering without permission or scope flicker
+    const [isRolesLoaded, setIsRolesLoaded] = useState(false);
+    const [isSitesLoaded, setIsSitesLoaded] = useState(false);
+    const [isStaffLoaded, setIsStaffLoaded] = useState(false);
 
     const [stats, setStats] = useState({
         pendingSubmissions: 0,
@@ -405,6 +415,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setLeaveBalances([]);
                 setNotifications([]);
                 setDrafts([]);
+                setIsRolesLoaded(true);
+                setIsStaffLoaded(true);
             }
             return;
         }
@@ -507,7 +519,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             unsubRoles = subscribeToRoles((r) => {
                 log.log(`[DataContext] Received ${r.length} roles`);
                 setRoles(r);
+                setIsRolesLoaded(true);
             });
+        } else {
+            setIsRolesLoaded(true);
         }
 
         return () => {
@@ -532,6 +547,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const unsubSites = subscribeToSites((s) => {
             log.log(`[DataContext] Received ${s.length} sites`);
             setSites(s);
+            setIsSitesLoaded(true);
         });
 
         const unsubSections = subscribeToFormSections((sec) => {
@@ -627,7 +643,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             unsubStaff = subscribeToStaffUsers((users) => {
                 log.log(`[DataContext] Received ${users.length} staff users`);
                 setStaffUsers(users);
+                setIsStaffLoaded(true);
             });
+        } else {
+            setIsStaffLoaded(true);
         }
 
         return () => {
@@ -671,6 +690,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         leavePolicy,
         portalConfig,
         allowedSiteIds,
+        isRolesLoaded,
+        isSitesLoaded,
+        isStaffLoaded,
         setRoles,
         setStaffUsers,
         setWorkflowConfigs,
