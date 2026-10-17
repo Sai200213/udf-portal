@@ -590,7 +590,8 @@ export const AdminInvitesPage: React.FC<AdminInvitesPageProps> = ({
     try {
       await updateDoc(doc(db, 'referral_invites', inviteToReactivate.id), {
         status: 'Active',
-        expiresAt: expiresAt
+        expiresAt: expiresAt,
+        ...((!inviteToReactivate.isReusable && (inviteToReactivate.joined || 0) >= 1) ? { joined: 0 } : {})
       });
       await logSystemAction('STATUS_CHANGE', 'INVITES', `Reactivated referral invite link ${inviteToReactivate.id} (${inviteToReactivate.siteName})`);
       setIsReactivateModalOpen(false);
@@ -1211,7 +1212,7 @@ export const AdminInvitesPage: React.FC<AdminInvitesPageProps> = ({
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredInvites.map((invite) => {
-                    const isExpired = invite.expiresAt ? new Date(invite.expiresAt).getTime() < Date.now() : false;
+                    const isExpired = (invite.expiresAt ? new Date(invite.expiresAt).getTime() < Date.now() : false) || (!invite.isReusable && (invite.joined || 0) >= 1);
                     const displayStatus = invite.status === 'Revoked' ? 'Revoked' : (isExpired ? 'Expired' : 'Active');
                     
                     // Derive real-time candidate pipeline stats for this invite

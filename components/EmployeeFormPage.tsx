@@ -235,9 +235,19 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     }));
     import('../src/services/employeeService').then(({ getReferralInvite }) => {
       getReferralInvite(inviteId).then(invite => {
-        if (invite && invite.status === 'Active' && (!invite.expiresAt || new Date(invite.expiresAt).getTime() > Date.now())) {
-          setReferralInvite(invite);
+        if (!invite || invite.status === 'Revoked') {
+          setInviteError("This referral invitation is inactive.");
+          clearOnboardingSession();
+          return;
         }
+        const isSingleUseConsumed = invite.isReusable === false && (invite.joined || 0) >= 1;
+        const isCalendarExpired = invite.expiresAt ? new Date(invite.expiresAt).getTime() < Date.now() : false;
+        if (invite.status !== 'Active' || isCalendarExpired || isSingleUseConsumed) {
+          setInviteError("This referral invitation has expired.");
+          clearOnboardingSession();
+          return;
+        }
+        setReferralInvite(invite);
       }).catch(e => console.warn('[Draft] Failed to restore referral invite:', e));
     });
   }, []);
@@ -967,9 +977,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
               const cleanPrefills: Record<string, any> = {};
               if (referralInvite) {
                 cleanPrefills.__referralInviteId = referralInvite.id;
-                if (referralInvite.siteName) {
-                  const matchedSite = sites.find(s => s.name === referralInvite.siteName || s.id === referralInvite.siteName);
-                  cleanPrefills[SITE_FIELD_ID] = matchedSite ? matchedSite.id : referralInvite.siteName;
+                if (referralInvite.siteName || referralInvite.siteId) {
+                  const matchedSite = sites.find(s => s.name === referralInvite.siteName || s.id === referralInvite.siteName || s.id === referralInvite.siteId);
+                  cleanPrefills[SITE_FIELD_ID] = referralInvite.siteId || (matchedSite ? matchedSite.id : referralInvite.siteName);
                 }
                 if (referralInvite.designation) {
                   cleanPrefills[DESIGNATION_FIELD_ID] = referralInvite.designation;
@@ -1224,19 +1234,25 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         try {
           const { getReferralInvite } = await import('../src/services/employeeService');
           const invite = await getReferralInvite(refId);
-          if (!invite) {
-            setInviteError("Invalid referral invitation link.");
+          if (!invite || invite.status === 'Revoked') {
+            setInviteError("This referral invitation is inactive.");
             clearOnboardingSession();
             setIsInviteLoading(false);
             return;
           }
           if (invite.status !== 'Active') {
-            setInviteError(`This referral invitation has been ${invite.status.toLowerCase()}.`);
+            setInviteError("This referral invitation has expired.");
             clearOnboardingSession();
             setIsInviteLoading(false);
             return;
           }
           if (invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+            setInviteError("This referral invitation has expired.");
+            clearOnboardingSession();
+            setIsInviteLoading(false);
+            return;
+          }
+          if (invite.isReusable === false && (invite.joined || 0) >= 1) {
             setInviteError("This referral invitation has expired.");
             clearOnboardingSession();
             setIsInviteLoading(false);
@@ -1255,10 +1271,10 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
 
           // Prefill values
           const prefillUpdates: Record<string, any> = {};
-          if (invite.siteName) {
+          if (invite.siteName || invite.siteId) {
             // Resolve site name to site ID for the dropdown (which now stores IDs)
-            const matchedSite = sites.find(s => s.name === invite.siteName || s.id === invite.siteName);
-            prefillUpdates[SITE_FIELD_ID] = matchedSite ? matchedSite.id : invite.siteName;
+            const matchedSite = sites.find(s => s.name === invite.siteName || s.id === invite.siteName || s.id === invite.siteId);
+            prefillUpdates[SITE_FIELD_ID] = invite.siteId || (matchedSite ? matchedSite.id : invite.siteName);
           }
           if (invite.designation) {
             prefillUpdates[DESIGNATION_FIELD_ID] = invite.designation;
@@ -1280,7 +1296,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
 
         } catch (e: any) {
           console.error("Error loading referral invite:", e);
-          setInviteError("Failed to validate referral invitation.");
+          setInviteError("This referral invitation is inactive.");
         } finally {
           setIsInviteLoading(false);
         }
@@ -1293,7 +1309,10 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
           try {
             const { getReferralInvite } = await import('../src/services/employeeService');
             const invite = await getReferralInvite(savedRefId);
-            if (invite && invite.status === 'Active' && (!invite.expiresAt || new Date(invite.expiresAt).getTime() > Date.now())) {
+            const isSingleUseConsumed = invite && invite.isReusable === false && (invite.joined || 0) >= 1;
+            const isCalendarExpired = invite && invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now();
+
+            if (invite && invite.status === 'Active' && !isCalendarExpired && !isSingleUseConsumed) {
               setReferralInvite(invite);
               
               const prefillUpdates: Record<string, any> = {};
@@ -1301,9 +1320,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
                 prefillUpdates['eb3617dc-9f1d-475d-a2db-005b6bc2500c'] = invite.lockedPhoneNumber;
               }
               if (isFormEmpty(formData, invite)) {
-                if (invite.siteName) {
-                  const matchedSite = sites.find(s => s.name === invite.siteName || s.id === invite.siteName);
-                  prefillUpdates[SITE_FIELD_ID] = matchedSite ? matchedSite.id : invite.siteName;
+                if (invite.siteName || invite.siteId) {
+                  const matchedSite = sites.find(s => s.name === invite.siteName || s.id === invite.siteName || s.id === invite.siteId);
+                  prefillUpdates[SITE_FIELD_ID] = invite.siteId || (matchedSite ? matchedSite.id : invite.siteName);
                 }
                 if (invite.designation) prefillUpdates[DESIGNATION_FIELD_ID] = invite.designation;
                 if (invite.prefillFields) {
@@ -1320,11 +1339,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
                 }));
               }
             } else {
-              // Stale saved invite - either doesn't exist, status !== 'Active', or has expired
-              if (!invite) {
-                setInviteError("Invalid referral invitation link.");
-              } else if (invite.status !== 'Active') {
-                setInviteError(`This referral invitation has been ${invite.status.toLowerCase()}.`);
+              // Stale saved invite - either doesn't exist, status !== 'Active', isSingleUseConsumed, or calendar expired
+              if (!invite || invite.status === 'Revoked') {
+                setInviteError("This referral invitation is inactive.");
               } else {
                 setInviteError("This referral invitation has expired.");
               }
@@ -2323,13 +2340,16 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   }
 
   if (inviteError) {
+    const isInactive = inviteError.toLowerCase().includes('inactive');
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center animate-in zoom-in duration-300">
-          <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
-            <XCircle size={48} className="text-red-500" />
+          <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <XCircle size={48} className="text-amber-500" />
           </div>
-          <h2 className="text-3xl font-bold text-gray-900 mb-2">Invitation Invalid</h2>
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">
+            {isInactive ? "Invitation Inactive" : "Invitation Expired"}
+          </h2>
           <p className="text-gray-600 mb-6">{inviteError}</p>
           <Button onClick={handleBackToHome} variant="primary" size="lg" className="w-full">Return to Home</Button>
         </div>

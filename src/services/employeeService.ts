@@ -987,6 +987,17 @@ export const submitEmployeeForm = async (
         const docRef = doc(db, SUBMISSIONS_COLLECTION, submissionId);
         await setDoc(docRef, submission);
 
+        // Increment referral joined count to retire single-use links or count successful joins
+        if (referralInviteId) {
+            try {
+                const inviteRef = doc(db, 'referral_invites', referralInviteId);
+                await updateDoc(inviteRef, { joined: increment(1) });
+                log.log(`[SUBMIT] Successfully incremented joined count for referral invite ${referralInviteId}`);
+            } catch (inviteUpdateErr) {
+                console.warn('[SUBMIT] Non-fatal error incrementing referral joined count:', inviteUpdateErr);
+            }
+        }
+
         // Clean up draft submission so candidate never remains in draft list once submitted
         try {
             const draftsToDelete = new Set<string>();
@@ -5027,6 +5038,16 @@ export const incrementReferralStarts = async (refId: string) => {
         });
     } catch (e) {
         console.error("Failed to increment referral starts:", e);
+    }
+};
+
+export const incrementReferralJoined = async (refId: string) => {
+    if (!refId) return;
+    try {
+        const docRef = doc(db, 'referral_invites', refId);
+        await updateDoc(docRef, { joined: increment(1) });
+    } catch (e) {
+        console.error("Failed to increment referral joined:", e);
     }
 };
 
