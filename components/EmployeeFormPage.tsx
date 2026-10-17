@@ -419,11 +419,6 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
         localStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
       }
-      // For Guest users: show recovery code popup on first milestone save
-      if (!linkedUid && !hasShownFirstSavePopup.current) {
-        hasShownFirstSavePopup.current = true;
-        setShowSaveModal(true);
-      }
     } catch (e: any) {
       if (e?.message?.includes('APPLICATION_ALREADY_SUBMITTED')) {
         const subId = e.message.split(':')[1] || savedDraftId || '';
@@ -1431,6 +1426,11 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Blur active input to prevent background typing
+    if (document.activeElement && 'blur' in document.activeElement) {
+      (document.activeElement as HTMLElement).blur();
+    }
+
     setIsParsingAadhaar(true);
     setShowResults(false);
     setExtractionWarning(null);
@@ -1458,6 +1458,11 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
 
   const handlePasswordSubmit = async () => {
     if (!pendingFile || !passwordInput.trim()) return;
+
+    // Blur active input to prevent background typing
+    if (document.activeElement && 'blur' in document.activeElement) {
+      (document.activeElement as HTMLElement).blur();
+    }
 
     const password = passwordInput.trim();
     setShowPasswordModal(false);
@@ -2600,6 +2605,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
                   navigator.clipboard.writeText(savedDraftId);
                   setCodeCopied(true);
                   setTimeout(() => setCodeCopied(false), 2000);
+                  toast.success(`Draft ID ${savedDraftId} copied to clipboard!`, { id: 'copy-draft-id' });
                 }}
                 className={`inline-flex items-center gap-1 px-2 sm:px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 active:scale-[0.97] cursor-pointer group transition-all duration-300 text-xs ${
                   badgePulse ? 'scale-105 bg-blue-100 border-blue-400 shadow-xs ring-2 ring-blue-100' : ''
@@ -3017,18 +3023,20 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
-              {currentSectionData?.fields.map((field) => {
-                if (!isFieldVisible(field)) return null;
-                // Hide Sub-Unit field from joining form - admins assign this later
-                if (field.id === SUBUNIT_FIELD_ID) return null;
-                return (
-                  <div key={field.id} className={`${field.type === FieldType.TEXTAREA || field.type === FieldType.FILE_UPLOAD ? 'sm:col-span-2' : ''}`}>
-                    {renderField(field)}
-                  </div>
-                );
-              })}
-            </div>
+            <fieldset disabled={isParsingAadhaar || isSubmitting} className="border-0 p-0 m-0 w-full min-w-0 disabled:opacity-80">
+              <div className="grid grid-cols-1 gap-y-6 gap-x-4 sm:grid-cols-2">
+                {currentSectionData?.fields.map((field) => {
+                  if (!isFieldVisible(field)) return null;
+                  // Hide Sub-Unit field from joining form - admins assign this later
+                  if (field.id === SUBUNIT_FIELD_ID) return null;
+                  return (
+                    <div key={field.id} className={`${field.type === FieldType.TEXTAREA || field.type === FieldType.FILE_UPLOAD ? 'sm:col-span-2' : ''}`}>
+                      {renderField(field)}
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
           )}
 
           {submissionError && (
@@ -3043,7 +3051,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
         <div className="flex items-center justify-between gap-3">
           <Button
             onClick={handlePrevStep}
-            disabled={currentStep === 0 || isSubmitting}
+            disabled={currentStep === 0 || isSubmitting || isParsingAadhaar}
             variant="outline"
             className="flex items-center px-4 sm:px-6"
             size="lg"
@@ -3054,7 +3062,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
           {isReviewStep ? (
             <Button
               onClick={handleFinalSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isParsingAadhaar}
               variant="primary"
               className="flex items-center px-6 sm:px-10 bg-blue-600 hover:bg-blue-700"
               size="lg"
@@ -3072,6 +3080,7 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
           ) : (
             <Button
               onClick={handleNextStep}
+              disabled={isSubmitting || isParsingAadhaar}
               variant="primary"
               className="flex items-center px-6 sm:px-10 bg-blue-600 hover:bg-blue-700"
               size="lg"
@@ -3153,6 +3162,31 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
 
         {/* Retrieve Draft Modal */}
         {renderRetrieveDraftModal()}
+
+        {/* ─── Aadhaar Extraction Full-Screen Loading Overlay & Input Guard ─── */}
+        {isParsingAadhaar && (
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 select-none"
+            style={{ pointerEvents: 'auto' }}
+          >
+            <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 max-w-sm w-full text-center flex flex-col items-center animate-in zoom-in-95 duration-200 border border-slate-100">
+              <div className="relative w-16 h-16 mb-4 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-blue-100 animate-ping opacity-30"></div>
+                <div className="w-16 h-16 rounded-full bg-blue-50 border-2 border-blue-200 flex items-center justify-center text-blue-600 shadow-inner">
+                  <Loader2 size={32} className="animate-spin text-blue-600" />
+                </div>
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-1">Extracting Aadhaar Details</h3>
+              <p className="text-xs sm:text-sm text-gray-500 mb-4 leading-relaxed">
+                Reading OCR data, unlocking document, and auto-filling your form fields. Please wait...
+              </p>
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-blue-50 border border-blue-100 rounded-full text-xs font-semibold text-blue-700">
+                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                Processing document...
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Save Draft Modal */}
         {showSaveModal && (
