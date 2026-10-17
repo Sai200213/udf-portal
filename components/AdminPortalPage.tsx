@@ -317,7 +317,7 @@ const AdminPortalPage: React.FC<AdminPortalPageProps> = (props) => {
         { id: AppView.ADMIN_PORTAL_DISCIPLINARY_MANAGEMENT, view: AppView.ADMIN_PORTAL_DISCIPLINARY_MANAGEMENT, label: 'Disciplinary Actions', icon: <Gavel size={18} />, visible: canSeeModule(Permission.MANAGE_DISCIPLINE, Permission.VIEW_DISCIPLINE) },
         { id: AppView.ADMIN_PORTAL_DRAFTS, view: AppView.ADMIN_PORTAL_DRAFTS, label: 'Onboarding Drafts', icon: <FileClock size={18} />, visible: hasPermission(Permission.SUBMISSIONS_VIEW_DRAFTS) },
         { id: AppView.ADMIN_PORTAL_CORRECTION_REQUESTS, view: AppView.ADMIN_PORTAL_CORRECTION_REQUESTS, label: 'Correction Links', icon: <Link2 size={18} />, visible: isSuperAdmin || hasPermission(Permission.SUBMISSIONS_VIEW_CORRECTION_LINKS) },
-        { id: AppView.ADMIN_PORTAL_GRIEVANCES, view: AppView.ADMIN_PORTAL_GRIEVANCES, label: 'Grievances & Care', icon: <MessageSquare size={18} />, visible: true },
+        { id: AppView.ADMIN_PORTAL_GRIEVANCES, view: AppView.ADMIN_PORTAL_GRIEVANCES, label: 'Grievances & Care', icon: <MessageSquare size={18} />, visible: isSuperAdmin || hasPermission(Permission.GRIEVANCES_VIEW) || hasPermission(Permission.REWARDS_VIEW) || hasPermission(Permission.REWARDS_MANAGE) },
       ]
     },
 
@@ -784,12 +784,16 @@ const AdminPortalPage: React.FC<AdminPortalPageProps> = (props) => {
       case AppView.ADMIN_LEGACY_SYSTEMS:
         return <AdminLegacySystemsPage logAction={logAction} />;
       case AppView.ADMIN_PORTAL_GRIEVANCES:
+        if (!isSuperAdmin && !hasPermission(Permission.GRIEVANCES_VIEW) && !hasPermission(Permission.REWARDS_VIEW) && !hasPermission(Permission.REWARDS_MANAGE)) {
+          return accessDenied;
+        }
         return (
           <AdminGrievancesPage
             authUser={authUser}
             isSuperAdmin={isSuperAdmin}
             userRole={userRole}
             onNotify={addToast}
+            allowedSiteIds={allowedSiteIds}
           />
         );
       case AppView.ADMIN_PORTAL_RECYCLE_BIN:

@@ -30,22 +30,45 @@ import {
     subscribeToRewardRedemptions,
     updateRewardRedemptionStatus 
 } from '../src/services/engagementService';
-import { User as AuthUser, Role } from '../types';
+import { User as AuthUser, Role, Permission } from '../types';
 
 interface AdminGrievancesPageProps {
     authUser: AuthUser | null;
     isSuperAdmin: boolean;
     userRole?: Role;
     onNotify?: (msg: string, type: 'success' | 'error' | 'info') => void;
+    allowedSiteIds?: string[];
 }
 
 const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
     authUser,
     isSuperAdmin,
     userRole,
-    onNotify
+    onNotify,
+    allowedSiteIds
 }) => {
-    const [activeTab, setActiveTab] = useState<'grievances' | 'rewards'>('grievances');
+    // Permission checks
+    const hasPermission = (p: Permission) => {
+        if (isSuperAdmin) return true;
+        if (userRole?.isDisabled === true) return false;
+        const overrides = (authUser as any)?.permissionOverrides;
+        if (overrides && overrides[p] !== undefined) {
+            return Boolean(overrides[p]);
+        }
+        return Boolean(userRole?.permissions?.includes(p));
+    };
+
+    const canViewGrievances = isSuperAdmin || hasPermission(Permission.GRIEVANCES_VIEW);
+    const hasGrievanceScopeAll = isSuperAdmin || hasPermission(Permission.GRIEVANCES_VIEW_SCOPE_ALL);
+    const canResolveGrievances = isSuperAdmin || hasPermission(Permission.GRIEVANCES_RESOLVE);
+    const canDeleteGrievances = isSuperAdmin || hasPermission(Permission.GRIEVANCES_DELETE);
+    const canViewRewards = isSuperAdmin || hasPermission(Permission.REWARDS_VIEW) || hasPermission(Permission.REWARDS_MANAGE);
+    const canManageRewards = isSuperAdmin || hasPermission(Permission.REWARDS_MANAGE);
+
+    const [activeTab, setActiveTab] = useState<'grievances' | 'rewards'>(() => {
+        if (!canViewGrievances && canViewRewards) return 'rewards';
+        return 'grievances';
+    });
 
     // Grievances State
     const [complaints, setComplaints] = useState<ComplaintItem[]>([]);
@@ -103,7 +126,11 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
 
     // Filtered Grievances
     const filteredComplaints = useMemo(() => {
+        if (!canViewGrievances) return [];
         return complaints.filter(c => {
+            if (!hasGrievanceScopeAll && allowedSiteIds && allowedSiteIds.length > 0) {
+                if (c.siteId && !allowedSiteIds.includes(c.siteId)) return false;
+            }
             const matchesSearch = 
                 (c.userName || '').toLowerCase().includes(complaintSearch.toLowerCase()) ||
                 (c.userId || '').toLowerCase().includes(complaintSearch.toLowerCase()) ||
@@ -111,10 +138,11 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
             const matchesStatus = complaintFilterStatus === 'all' || c.status === complaintFilterStatus;
             return matchesSearch && matchesStatus;
         });
-    }, [complaints, complaintSearch, complaintFilterStatus]);
+    }, [complaints, complaintSearch, complaintFilterStatus, canViewGrievances, hasGrievanceScopeAll, allowedSiteIds]);
 
     // Filtered Rewards
     const filteredRewards = useMemo(() => {
+        if (!canViewRewards) return [];
         return redemptions.filter(r => {
             const matchesSearch = 
                 (r.userName || '').toLowerCase().includes(rewardSearch.toLowerCase()) ||
@@ -123,7 +151,7 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
             const matchesStatus = rewardFilterStatus === 'all' || r.status === rewardFilterStatus;
             return matchesSearch && matchesStatus;
         });
-    }, [redemptions, rewardSearch, rewardFilterStatus]);
+    }, [redemptions, rewardSearch, rewardFilterStatus, canViewRewards]);
 
     // Grievance KPI Stats
     const grievanceStats = useMemo(() => {
@@ -241,40 +269,42 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                 </div>
 
                 {/* Sub-Tabs */}
-                <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
-                    <button
-                        onClick={() => setActiveTab('grievances')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                            activeTab === 'grievances'
-                                ? 'bg-white text-indigo-700 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                    >
-                        <AlertCircle className="h-4 w-4" />
-                        Grievances & Complaints
-                        {grievanceStats.pending > 0 && (
-                            <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
-                                {grievanceStats.pending}
-                            </span>
-                        )}
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('rewards')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                            activeTab === 'rewards'
-                                ? 'bg-white text-indigo-700 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                    >
-                        <Gift className="h-4 w-4" />
-                        Reward Redemptions
-                        {rewardStats.pending > 0 && (
-                            <span className="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
-                                {rewardStats.pending}
-                            </span>
-                        )}
-                    </button>
-                </div>
+                {(canViewGrievances && canViewRewards) && (
+                    <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+                        <button
+                            onClick={() => setActiveTab('grievances')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                                activeTab === 'grievances'
+                                    ? 'bg-white text-indigo-700 shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                        >
+                            <AlertCircle className="h-4 w-4" />
+                            Grievances & Complaints
+                            {grievanceStats.pending > 0 && (
+                                <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
+                                    {grievanceStats.pending}
+                                </span>
+                            )}
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('rewards')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                                activeTab === 'rewards'
+                                    ? 'bg-white text-indigo-700 shadow-sm'
+                                    : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                        >
+                            <Gift className="h-4 w-4" />
+                            Reward Redemptions
+                            {rewardStats.pending > 0 && (
+                                <span className="bg-amber-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
+                                    {rewardStats.pending}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* TAB 1: GRIEVANCES */}
@@ -414,9 +444,9 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                                                         onClick={() => handleOpenComplaintModal(item)}
                                                         className="text-xs"
                                                     >
-                                                        Review & Update
+                                                        {canResolveGrievances ? 'Review & Update' : 'View Details'}
                                                     </Button>
-                                                    {isSuperAdmin && (
+                                                    {canDeleteGrievances && (
                                                         <button
                                                             onClick={() => handleDeleteComplaint(item.id)}
                                                             className="text-gray-400 hover:text-red-600 p-1.5 transition-colors"
@@ -561,7 +591,7 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                                                         onClick={() => handleOpenRewardModal(item)}
                                                         className="text-xs"
                                                     >
-                                                        Fulfillment Status
+                                                        {canManageRewards ? 'Fulfillment Status' : 'View Details'}
                                                     </Button>
                                                 </td>
                                             </tr>
@@ -599,8 +629,9 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                             <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">Ticket Status</label>
                             <select
                                 value={targetStatus}
+                                disabled={!canResolveGrievances}
                                 onChange={(e) => setTargetStatus(e.target.value as any)}
-                                className="w-full text-sm border border-gray-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="w-full text-sm border border-gray-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500"
                             >
                                 <option value="pending">Pending (Action Required)</option>
                                 <option value="in-review">Under Investigation / In Review</option>
@@ -613,7 +644,8 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                             <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">HR Resolution / Investigation Notes</label>
                             <Textarea
                                 rows={3}
-                                placeholder="Enter internal HR notes, resolution outcome, or communication with site supervisors..."
+                                readOnly={!canResolveGrievances}
+                                placeholder={canResolveGrievances ? "Enter internal HR notes, resolution outcome, or communication with site supervisors..." : "No resolution notes entered."}
                                 value={resolutionNotes}
                                 onChange={(e) => setResolutionNotes(e.target.value)}
                             />
@@ -621,11 +653,13 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
 
                         <div className="flex justify-end gap-3 pt-3 border-t border-gray-200">
                             <Button variant="outline" onClick={() => setSelectedComplaint(null)}>
-                                Cancel
+                                {canResolveGrievances ? 'Cancel' : 'Close'}
                             </Button>
-                            <Button onClick={handleSaveComplaint} disabled={isSavingComplaint}>
-                                {isSavingComplaint ? 'Saving...' : 'Save Grievance Resolution'}
-                            </Button>
+                            {canResolveGrievances && (
+                                <Button onClick={handleSaveComplaint} disabled={isSavingComplaint}>
+                                    {isSavingComplaint ? 'Saving...' : 'Save Grievance Resolution'}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </Modal>
@@ -654,8 +688,9 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                             <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">Fulfillment Status</label>
                             <select
                                 value={targetRewardStatus}
+                                disabled={!canManageRewards}
                                 onChange={(e) => setTargetRewardStatus(e.target.value as any)}
-                                className="w-full text-sm border border-gray-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="w-full text-sm border border-gray-300 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500"
                             >
                                 <option value="pending">Pending Dispatch</option>
                                 <option value="fulfilled">Fulfilled / Dispatched</option>
@@ -667,7 +702,8 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
                             <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">Fulfillment Notes / Voucher / Courier Tracking</label>
                             <Textarea
                                 rows={3}
-                                placeholder="Enter voucher code, courier tracking number, or dispatch notes..."
+                                readOnly={!canManageRewards}
+                                placeholder={canManageRewards ? "Enter voucher code, courier tracking number, or dispatch notes..." : "No fulfillment notes entered."}
                                 value={fulfillmentNotes}
                                 onChange={(e) => setFulfillmentNotes(e.target.value)}
                             />
@@ -675,11 +711,13 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
 
                         <div className="flex justify-end gap-3 pt-3 border-t border-gray-200">
                             <Button variant="outline" onClick={() => setSelectedReward(null)}>
-                                Cancel
+                                {canManageRewards ? 'Cancel' : 'Close'}
                             </Button>
-                            <Button onClick={handleSaveReward} disabled={isSavingReward}>
-                                {isSavingReward ? 'Saving...' : 'Update Fulfillment'}
-                            </Button>
+                            {canManageRewards && (
+                                <Button onClick={handleSaveReward} disabled={isSavingReward}>
+                                    {isSavingReward ? 'Saving...' : 'Update Fulfillment'}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 </Modal>

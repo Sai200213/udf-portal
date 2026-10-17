@@ -152,6 +152,22 @@ const PERMISSION_MODULES: PermissionModule[] = [
     ]
   },
   {
+    id: 'grievances',
+    groupId: 'requests',
+    name: 'Employee Care & Grievances',
+    description: 'Review anonymous and direct employee grievances, resolve incident tickets, and fulfill reward redemptions.',
+    viewPermission: Permission.GRIEVANCES_VIEW,
+    scopeAllPermission: Permission.GRIEVANCES_VIEW_SCOPE_ALL,
+    readOnlyOptions: [
+      { key: Permission.REWARDS_VIEW, label: 'View Reward Redemptions', explanation: 'Allows viewing gamification point reward redemption requests.' }
+    ],
+    decisionOptions: [
+      { key: Permission.GRIEVANCES_RESOLVE, label: 'Resolve Grievance Tickets', explanation: 'Allows changing grievance ticket status (in-review, resolved, dismissed) and adding resolution notes.' },
+      { key: Permission.GRIEVANCES_DELETE, label: 'Delete Grievance Tickets', explanation: 'Allows permanently purging grievance tickets from the database.' },
+      { key: Permission.REWARDS_MANAGE, label: 'Fulfill & Manage Rewards', explanation: 'Allows marking gamification rewards as fulfilled or rejected with fulfillment notes.' }
+    ]
+  },
+  {
     id: 'personnel',
     groupId: 'personnel',
     name: 'Personnel Directory',
