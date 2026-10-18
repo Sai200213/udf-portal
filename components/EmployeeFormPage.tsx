@@ -15,7 +15,7 @@ import { subscribeToLegacyClaimConfig } from '../src/services/adminService';
 import { signOut } from 'firebase/auth';
 import { auth, storage, ensureAuthenticated } from '../src/firebase/config';
 import { ref, getDownloadURL, getBlob } from 'firebase/storage';
-import { uploadSubmissionDocument } from '../src/services/storageService';
+import { uploadSubmissionDocument, deleteStorageFile } from '../src/services/storageService';
 import { saveFileToSession, removeFileFromSession, getAllFilesFromSession, clearFileSession } from '../src/utils/fileSessionStore';
 
 // Import employee-specific field components
@@ -1615,6 +1615,23 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
           activeDraftId || undefined,
           { skipCompression: true }
         );
+        // If candidate had previously uploaded Aadhaar files before running extraction, clean up previous files
+        const prevFrontVal = formData[aadharFrontId];
+        const prevFrontPath = typeof prevFrontVal === 'object' && prevFrontVal !== null && 'storagePath' in prevFrontVal
+          ? prevFrontVal.storagePath
+          : (typeof prevFrontVal === 'string' ? prevFrontVal : '');
+        if (prevFrontPath && prevFrontPath.startsWith('onboarding/') && prevFrontPath !== unlockedStoragePath) {
+          deleteStorageFile(prevFrontPath).catch(() => {});
+        }
+
+        const prevBackVal = formData[aadharBackId];
+        const prevBackPath = typeof prevBackVal === 'object' && prevBackVal !== null && 'storagePath' in prevBackVal
+          ? prevBackVal.storagePath
+          : (typeof prevBackVal === 'string' ? prevBackVal : '');
+        if (prevBackPath && prevBackPath.startsWith('onboarding/') && prevBackPath !== unlockedStoragePath && prevBackPath !== prevFrontPath) {
+          deleteStorageFile(prevBackPath).catch(() => {});
+        }
+
         updates[aadharFrontId] = unlockedStoragePath;
         updates[aadharBackId] = unlockedStoragePath;
         updates['unlockedAadhaarStoragePath'] = unlockedStoragePath;
@@ -1830,39 +1847,90 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       return newData;
     });
 
+    // Helper to safely extract storage path string
+    const getStoragePath = (val: any): string | null => {
+      if (!val) return null;
+      if (typeof val === 'string' && val.startsWith('onboarding/')) return val;
+      if (typeof val === 'object' && val !== null && 'storagePath' in val && typeof val.storagePath === 'string' && val.storagePath.startsWith('onboarding/')) {
+        return val.storagePath;
+      }
+      return null;
+    };
+
+    // Helper to check if a storage path is referenced anywhere else in the form
+    const isPathShared = (path: string, excludeKey: string): boolean => {
+      if (!path) return false;
+      const ignoredKeys = new Set(['unlockedAadhaarStoragePath', 'originalAadhaarStoragePath']);
+      return Object.entries(formDataRef.current).some(([k, v]) => {
+        if (k === excludeKey || ignoredKeys.has(k)) return false;
+        const p = getStoragePath(v);
+        return p === path;
+      });
+    };
+
+    const prevStoragePath = getStoragePath(formDataRef.current[fieldId]);
+
     // Persist file uploads to IndexedDB for reload recovery
     if (value instanceof File) {
       saveFileToSession(fieldId, value);
     } else if (value === null || value === undefined || value === '') {
       // File was cleared — remove from IndexedDB too
       removeFileFromSession(fieldId);
-      // If a previously synced cloud document is removed, sync deletion to Firestore draft immediately
-      if (formDataRef.current[fieldId] && typeof formDataRef.current[fieldId] === 'string' && formDataRef.current[fieldId].startsWith('onboarding/')) {
+
+      // If a previously synced cloud document is removed:
+      if (prevStoragePath) {
+        // Delete from Cloud Storage only if no other field is sharing this file path
+        if (!isPathShared(prevStoragePath, fieldId)) {
+          deleteStorageFile(prevStoragePath).catch((err) => {
+            console.warn('[Storage] File deletion on remove warning:', err);
+          });
+        }
+
+        // Sync deletion to Firestore draft immediately
         const updated = { ...formDataRef.current };
         delete updated[fieldId];
+
+        // Clean up unlockedAadhaarStoragePath if this was the last field referencing it
+        if (updated['unlockedAadhaarStoragePath'] === prevStoragePath && !isPathShared(prevStoragePath, fieldId)) {
+          delete updated['unlockedAadhaarStoragePath'];
+        }
+
         onSaveDraft(updated, currentStepRef.current, savedDraftIdRef.current || undefined).then((draftId) => {
           if (draftId) {
             setSavedDraftId(draftId);
             lastSavedDataRef.current = JSON.stringify({ data: updated, step: currentStepRef.current });
+            toast.success('Document removed', { duration: 2000, id: `draft-remove-${fieldId}` });
           }
         }).catch((err) => {
           console.warn('[AutoSave] Document deletion sync warning:', err);
         });
       }
-    } else if (typeof value === 'string' && value.startsWith('onboarding/')) {
-      // Document upload completed: Immediately persist to Firestore cloud draft without waiting for 'Next' button
-      const updated = { ...formDataRef.current, [fieldId]: value };
-      onSaveDraft(updated, currentStepRef.current, savedDraftIdRef.current || undefined).then((draftId) => {
-        if (draftId) {
-          setSavedDraftId(draftId);
-          lastSavedDataRef.current = JSON.stringify({ data: updated, step: currentStepRef.current });
-          sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
-          localStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
-          toast.success('Document saved to cloud draft!', { duration: 2500, id: `draft-save-${fieldId}` });
+    } else {
+      const newStoragePath = getStoragePath(value);
+      if (newStoragePath) {
+        // If replacing an existing file in this field:
+        if (prevStoragePath && prevStoragePath !== newStoragePath) {
+          if (!isPathShared(prevStoragePath, fieldId)) {
+            deleteStorageFile(prevStoragePath).catch((err) => {
+              console.warn('[Storage] File replacement deletion warning:', err);
+            });
+          }
         }
-      }).catch((err) => {
-        console.warn('[AutoSave] Document draft sync warning:', err);
-      });
+
+        // Document upload / replacement completed: Immediately persist to Firestore cloud draft without waiting for 'Next' button
+        const updated = { ...formDataRef.current, [fieldId]: value };
+        onSaveDraft(updated, currentStepRef.current, savedDraftIdRef.current || undefined).then((draftId) => {
+          if (draftId) {
+            setSavedDraftId(draftId);
+            lastSavedDataRef.current = JSON.stringify({ data: updated, step: currentStepRef.current });
+            sessionStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
+            localStorage.setItem(SS_SAVED_DRAFT_ID, JSON.stringify(draftId));
+            toast.success('Document saved to cloud draft!', { duration: 2500, id: `draft-save-${fieldId}` });
+          }
+        }).catch((err) => {
+          console.warn('[AutoSave] Document draft sync warning:', err);
+        });
+      }
     }
 
     // Instant Validation

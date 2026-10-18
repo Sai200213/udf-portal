@@ -312,6 +312,36 @@ function compressImage(file: File, maxSize: number, quality: number): Promise<Fi
         reader.readAsDataURL(file);
     });
 }
+/**
+ * Safely deletes a single file in Firebase Storage.
+ * Handles storage path string or object containing storagePath.
+ * Silently handles missing files and catches errors without crashing.
+ */
+export const deleteStorageFile = async (filePath: string | any): Promise<boolean> => {
+    let resolvedPath: string = typeof filePath === 'object' && filePath !== null && 'storagePath' in filePath
+        ? filePath.storagePath
+        : (typeof filePath === 'string' ? filePath : '');
+
+    // Skip empty or external/blob URLs
+    if (!resolvedPath || resolvedPath.startsWith('http') || resolvedPath.startsWith('blob:') || resolvedPath.startsWith('data:')) {
+        return false;
+    }
+
+    try {
+        await ensureAuthenticated();
+        const fileRef = ref(storage, resolvedPath);
+        await deleteObject(fileRef);
+        console.log(`[STORAGE] Deleted file: ${resolvedPath}`);
+        return true;
+    } catch (err: any) {
+        if (err?.code === 'storage/object-not-found') {
+            // Already deleted or doesn't exist
+            return true;
+        }
+        console.warn(`[STORAGE] Failed to delete file at ${resolvedPath}:`, err?.message || err);
+        return false;
+    }
+};
 
 /**
  * Recursively deletes a folder and all its contents in Firebase Storage.

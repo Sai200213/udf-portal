@@ -458,14 +458,28 @@ const EmployeeFileUploadField: React.FC<EmployeeFieldProps> = ({ field, value, o
 
             <Button
               type="button"
+              onClick={() => fileInputRef.current?.click()}
+              variant="secondary"
+              size="sm"
+              disabled={disabled || isUploading || isResolving}
+              className="bg-white hover:bg-gray-50 text-gray-700 border-gray-250 flex items-center gap-2 rounded-xl py-2 px-3.5 shadow-sm"
+              title="Replace this document with another file"
+            >
+              <Upload size={14} />
+              Replace
+            </Button>
+
+            <Button
+              type="button"
               onClick={() => {
+                if (fileInputRef.current) fileInputRef.current.value = '';
                 onChange(field.id, null);
                 setLocalThumbnail(null);
                 setResolvedUrl(null);
               }}
               variant="secondary"
               size="sm"
-              disabled={disabled}
+              disabled={disabled || isUploading || isResolving}
               className="bg-white hover:bg-red-50 text-red-600 border-red-100 hover:border-red-200 flex items-center gap-2 rounded-xl py-2 px-3.5 shadow-sm"
             >
               <Trash2 size={14} />
