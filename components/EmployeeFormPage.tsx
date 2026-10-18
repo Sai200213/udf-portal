@@ -317,7 +317,27 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
   // Aadhaar Parsing State
   const [isParsingAadhaar, setIsParsingAadhaar] = useState(false);
   const [pdfPassword, setPdfPassword] = useState('');
+  const [unlockedAadhaarFile, setUnlockedAadhaarFile] = useState<{ file: File; name: string } | null>(null);
+  const [hasDownloadedUnlocked, setHasDownloadedUnlocked] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadUnlockedPdf = () => {
+    if (!unlockedAadhaarFile) return;
+    try {
+      const downloadUrl = URL.createObjectURL(unlockedAadhaarFile.file);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = downloadUrl;
+      downloadLink.download = `unlocked_${unlockedAadhaarFile.name}`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 3000);
+      setHasDownloadedUnlocked(true);
+      toast.success('Unlocked Aadhaar PDF downloaded to your device!', { id: 'download-unlocked-aadhaar' });
+    } catch (e) {
+      console.warn('Failed to download unlocked PDF:', e);
+    }
+  };
 
   // Password Modal State
   // Job Opening URL Prefill (?siteId=X&role=Y)
@@ -1475,24 +1495,9 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       setPdfPassword(password);
       unlockedFile = await removePdfPassword(pendingFile, password);
       currentPassword = password;
-
-      // Give them an option to download the unlocked PDF or not
-      try {
-        const shouldDownload = window.confirm("Your Aadhaar PDF was successfully unlocked for parsing!\n\nWould you like to download the unlocked (unencrypted) copy to your device?");
-        if (shouldDownload) {
-          const downloadUrl = URL.createObjectURL(unlockedFile);
-          const downloadLink = document.createElement('a');
-          downloadLink.href = downloadUrl;
-          downloadLink.download = `unlocked_${pendingFile.name}`;
-          document.body.appendChild(downloadLink);
-          downloadLink.click();
-          document.body.removeChild(downloadLink);
-          // Revoke after a short delay to ensure download starts
-          setTimeout(() => URL.revokeObjectURL(downloadUrl), 3000);
-        }
-      } catch (dlErr) {
-        console.warn('Download of unlocked PDF failed:', dlErr);
-      }
+      // Offer download directly inside the full-screen extraction loading popup without blocking execution
+      setUnlockedAadhaarFile({ file: unlockedFile, name: pendingFile.name });
+      setHasDownloadedUnlocked(false);
     } catch (retryErr: any) {
       if (retryErr.message === 'INVALID_PASSWORD_OR_FORMAT') {
         setShowPasswordModal(true);
@@ -1697,6 +1702,8 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
       setIsParsingAadhaar(false);
       setPdfPassword('');
       setPendingFile(null);
+      setUnlockedAadhaarFile(null);
+      setHasDownloadedUnlocked(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -3177,12 +3184,48 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
                 </div>
               </div>
               <h3 className="text-lg font-bold text-gray-900 mb-1">Extracting Aadhaar Details</h3>
-              <p className="text-xs sm:text-sm text-gray-500 mb-4 leading-relaxed">
+              <p className="text-xs sm:text-sm text-gray-500 mb-3 leading-relaxed">
                 Reading OCR data, unlocking document, and auto-filling your form fields. Please wait...
               </p>
+
+              {/* Unlocked Aadhaar Download Option inside Extraction Loading Modal */}
+              {unlockedAadhaarFile && (
+                <div className="w-full mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-left animate-in fade-in duration-200">
+                  <div className="flex items-start gap-2">
+                    <span className="text-base flex-shrink-0">🔓</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-emerald-900 leading-tight">
+                        PDF Unlocked Successfully!
+                      </p>
+                      <p className="text-[11px] text-emerald-700 mt-0.5 leading-snug">
+                        Would you like to save the unlocked copy to your device?
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleDownloadUnlockedPdf}
+                      disabled={hasDownloadedUnlocked}
+                      className="w-full py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-80 disabled:cursor-default"
+                    >
+                      {hasDownloadedUnlocked ? (
+                        <>
+                          <CheckCircle size={13} /> Saved to Device
+                        </>
+                      ) : (
+                        <>
+                          <Download size={13} /> Download Unlocked PDF
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-blue-50 border border-blue-100 rounded-full text-xs font-semibold text-blue-700">
                 <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                Processing document...
+                Extraction in progress...
               </div>
             </div>
           </div>
