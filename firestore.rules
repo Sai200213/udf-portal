@@ -242,15 +242,17 @@ service cloud.firestore {
       allow list: if isAdmin() || (isAuthenticated() && (resource.data.ownerUid == request.auth.uid || (resource.data.ownerEmail != null && resource.data.ownerEmail == request.auth.token.email)));
       // Anyone authenticated can create their draft by recovery code ID
       allow create: if isAuthenticated();
-      // Updates allowed only if admin or the owner who created it
+      // Updates allowed if admin, original owner, matching Google email, or guest draft accessed via recovery code
       allow update: if isAdmin() || (isAuthenticated() && (
         resource.data.ownerUid == request.auth.uid || 
-        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', ''))
+        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', '')) ||
+        resource.data.get('isGoogleDraft', false) == false
       ));
-      // Deletions allowed for admin or the draft owner
+      // Deletions allowed for admin, original owner, matching Google email, or guest draft accessed via recovery code
       allow delete: if isAdmin() || (isAuthenticated() && (
         resource.data.ownerUid == request.auth.uid || 
-        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', ''))
+        (resource.data.get('ownerEmail', '') != '' && resource.data.ownerEmail == request.auth.token.get('email', '')) ||
+        resource.data.get('isGoogleDraft', false) == false
       ));
     }
 
