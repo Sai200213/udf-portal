@@ -3271,19 +3271,42 @@ exports.getUploadUrl = functions.https.onCall(async (request) => {
         throw new functions.https.HttpsError('invalid-argument', 'Missing required fields: context, storagePath, contentType.');
     }
 
-    // Block files over 10MB and invalid MIME types
-    const MAX_SIZE = 10 * 1024 * 1024;
-    if (fileSize && fileSize > MAX_SIZE) {
-        throw new functions.https.HttpsError('invalid-argument', 'File exceeds 10MB limit.');
-    }
-    const allowedTypes = /^(image\/|application\/pdf)/;
-    if (!allowedTypes.test(contentType)) {
-        throw new functions.https.HttpsError('invalid-argument', 'Only images and PDF files are allowed.');
+    // 1. Enforce MIME Whitelist (strictly PDF and images, excluding SVG/HTML)
+    let normalizedContentType = (contentType || '').toLowerCase().trim();
+    if (normalizedContentType === 'image/jpg') normalizedContentType = 'image/jpeg';
+    const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!ALLOWED_TYPES.includes(normalizedContentType)) {
+        throw new functions.https.HttpsError('invalid-argument', 'File type not allowed. Permitted types: PDF, JPEG, PNG, WEBP.');
     }
 
-    // Block path traversal attempts
-    if (storagePath.includes('..') || storagePath.startsWith('/')) {
-        throw new functions.https.HttpsError('invalid-argument', 'Invalid storage path.');
+    // 2. Enforce File Size Ceiling (Max 10MB, Min 1 byte)
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (!fileSize || typeof fileSize !== 'number' || fileSize <= 0 || fileSize > MAX_SIZE) {
+        throw new functions.https.HttpsError('invalid-argument', 'File size must be specified and must not exceed 10MB.');
+    }
+
+    // 3. Prevent Path Traversal and Relative Traversal Attacks
+    const path = require('path');
+    const normalizedPath = storagePath.replace(/\\/g, '/').trim();
+    if (
+        normalizedPath.includes('..') ||
+        normalizedPath.includes('\0') ||
+        normalizedPath.startsWith('/') ||
+        path.normalize(normalizedPath).replace(/\\/g, '/') !== normalizedPath
+    ) {
+        throw new functions.https.HttpsError('invalid-argument', 'Invalid storage path: Path traversal is strictly prohibited.');
+    }
+
+    // 4. Enforce Context-Specific Root Folder Namespacing
+    const firstSegment = normalizedPath.split('/')[0];
+    if (context === 'onboarding' && firstSegment !== 'onboarding') {
+        throw new functions.https.HttpsError('invalid-argument', 'Onboarding uploads must reside under onboarding/.');
+    }
+    if (context === 'employee' && firstSegment !== 'employees') {
+        throw new functions.https.HttpsError('invalid-argument', 'Employee uploads must reside under employees/.');
+    }
+    if (context === 'profile' && firstSegment !== 'profile' && firstSegment !== 'employees') {
+        throw new functions.https.HttpsError('invalid-argument', 'Profile uploads must reside under profile/ or employees/.');
     }
 
     const db = admin.firestore();
@@ -3460,7 +3483,7 @@ exports.getUploadUrl = functions.https.onCall(async (request) => {
         const [signedUrl] = await file.getSignedUrl({
             action: 'write',
             expires: Date.now() + 15 * 60 * 1000, // 15 minutes
-            contentType: contentType,
+            contentType: normalizedContentType,
         });
 
         console.log(`[STORAGE] Signed upload URL issued for uid=${uid}, context=${context}, path=${storagePath}`);
@@ -3588,8 +3611,36 @@ exports.setAdminClaims = functions.https.onCall(async (request) => {
         throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated.');
     }
     const uid = request.auth.uid;
+    const email = (request.auth.token && request.auth.token.email) ? request.auth.token.email.toLowerCase().trim() : '';
+    const db = admin.firestore();
+
+    // 1. Strict Server-Side Verification: Verify caller against staff_accounts or users
+    const [staffDocSnap, userDocSnap, staffEmailSnap] = await Promise.all([
+        db.collection('staff_accounts').doc(uid).get(),
+        db.collection('users').doc(uid).get(),
+        email ? db.collection('staff_accounts').where('email', '==', email).limit(1).get() : Promise.resolve(null)
+    ]);
+
+    const staffData = staffDocSnap.exists ? staffDocSnap.data() : (staffEmailSnap && !staffEmailSnap.empty ? staffEmailSnap.docs[0].data() : null);
+    const userData = userDocSnap.exists ? userDocSnap.data() : null;
+    const profile = staffData || userData;
+
+    if (!profile) {
+        await admin.auth().setCustomUserClaims(uid, {});
+        throw new functions.https.HttpsError('permission-denied', 'Unauthorized: Caller is not a registered staff member.');
+    }
+
+    if (profile.isDisabled === true || profile.isActive === false) {
+        await admin.auth().setCustomUserClaims(uid, {});
+        throw new functions.https.HttpsError('permission-denied', 'Unauthorized: Account is inactive or disabled.');
+    }
+
     try {
-        const res = await computeAndApplyUserClaims(uid);
+        const resolvedDocId = staffDocSnap.exists ? uid : (staffEmailSnap && !staffEmailSnap.empty ? staffEmailSnap.docs[0].id : uid);
+        const res = await computeAndApplyUserClaims(uid, resolvedDocId, profile);
+        if (!res.isAdmin) {
+            throw new functions.https.HttpsError('permission-denied', 'Unauthorized to receive admin claims.');
+        }
         return res;
     } catch (error) {
         if (error instanceof functions.https.HttpsError) throw error;
