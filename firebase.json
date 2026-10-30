@@ -123,7 +123,7 @@
           ]
         },
         {
-          "source": "/(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
+          "source": "**/@(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
           "headers": [
             {
               "key": "Cache-Control",
@@ -196,7 +196,7 @@
           ]
         },
         {
-          "source": "/(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
+          "source": "**/@(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
           "headers": [
             {
               "key": "Cache-Control",
@@ -269,7 +269,7 @@
           ]
         },
         {
-          "source": "/(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
+          "source": "**/@(sw.js|sw-v2.js|registerSW.js|workbox-*.js|index.html)",
           "headers": [
             {
               "key": "Cache-Control",
