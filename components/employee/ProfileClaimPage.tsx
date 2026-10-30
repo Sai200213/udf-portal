@@ -48,15 +48,20 @@ const ProfileClaimPage: React.FC = () => {
 
     // Load the legacy claim config to know which metric to ask for
     useEffect(() => {
-        const unsub = onSnapshot(doc(db, 'settings', 'legacy_claim_config'), (snap) => {
-            if (snap.exists()) {
-                setConfig(snap.data() as LegacyClaimConfig);
-            } else {
-                setConfig(null);
-            }
-            setConfigLoading(false);
-        });
-        return () => unsub();
+        let unsub: (() => void) | undefined;
+        import('../../src/firebase/config').then(({ ensureAuthenticated }) =>
+            ensureAuthenticated().then(() => {
+                unsub = onSnapshot(doc(db, 'settings', 'legacy_claim_config'), (snap) => {
+                    if (snap.exists()) {
+                        setConfig(snap.data() as LegacyClaimConfig);
+                    } else {
+                        setConfig(null);
+                    }
+                    setConfigLoading(false);
+                });
+            })
+        );
+        return () => { if (unsub) unsub(); };
     }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {

@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../firebase/config';
 import { collection, doc, getDoc, setDoc, writeBatch, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { resolveLocation, validateBulkImportLocations } from './subUnitUtils';
-import { hashPassword } from './cryptoUtils';
+import { hashCandidatePassword } from '../services/employeeService';
 import * as XLSX from 'xlsx';
 
 // Collection names
@@ -848,7 +848,7 @@ export const bulkImportEmployees = async (
                 }
             }
 
-            const defaultPasswordHash = await hashPassword(generateDefaultPassword(row.fullName, row.dateOfBirth));
+            const defaultPasswordHash = await hashCandidatePassword(generateDefaultPassword(row.fullName, row.dateOfBirth));
             const finalPasswordHash = existingEmpDoc?.passwordHash || defaultPasswordHash;
             const finalIsDefaultPassword = existingEmpDoc?.isDefaultPassword !== undefined ? existingEmpDoc.isDefaultPassword : true;
 

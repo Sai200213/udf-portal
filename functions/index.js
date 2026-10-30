@@ -16,14 +16,28 @@ const hashPassword = async (password) => {
 const verifyPassword = async (plainText, hash) => {
     // Handle legacy SHA-256 hashes during migration period
     if (hash && hash.length === 64 && !hash.startsWith('$2')) {
-        // It's a SHA-256 hex hash — compare and upgrade on next login
+        // It's a legacy SHA-256 hex hash — compare and upgrade on next login
         const crypto = require('crypto');
-        const sha256 = crypto.createHash('sha256').update(plainText + 'UDF_PORTAL_SALT_2026_!!').digest('hex');
+        const legacySalt = process.env.LEGACY_SHA256_SALT || 'UDF_PORTAL_SALT_2026_!!';
+        const sha256 = crypto.createHash('sha256').update(plainText + legacySalt).digest('hex');
         return sha256 === hash;
     }
     // Modern bcrypt hash
     return await bcrypt.compare(plainText, hash);
 };
+
+// Secure server-side password hashing using bcrypt (cost 12)
+exports.hashCandidatePasswordServer = functions.https.onCall(async (request) => {
+    if (!request.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Must be authenticated');
+    }
+    const { password } = request.data || {};
+    if (!password || typeof password !== 'string' || password.length < 6) {
+        throw new functions.https.HttpsError('invalid-argument', 'Password must be at least 6 characters');
+    }
+    const hashed = await hashPassword(password);
+    return { passwordHash: hashed };
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH & IDENTITY INTEGRITY

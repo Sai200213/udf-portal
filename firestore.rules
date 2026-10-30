@@ -138,7 +138,7 @@ service cloud.firestore {
     // ─── Settings / Metadata ────────────────────────────────────────────────
     // Form structure, login labels, and public stats are public (needed for onboarding + landing page)
     match /settings/{docId} {
-      allow read: if true;
+      allow read: if docId in ['public_website', 'public_stats', 'sites', 'form_sections', 'portal_config'] || isAuthenticated();
       allow write: if isSuperAdmin() || hasPermission('MANAGE_SYSTEM') ||
         (docId == 'sites' && (hasPermission('SITES_MANAGE') || hasPermission('SITES_EDIT_INFO') || hasPermission('MANAGE_SITES'))) ||
         (docId == 'workflows' && hasPermission('MANAGE_WORKFLOWS')) ||

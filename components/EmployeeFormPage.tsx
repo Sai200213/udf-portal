@@ -2121,8 +2121,8 @@ const EmployeeFormPage: React.FC<EmployeeFormPageProps> = ({ sections, isLoading
     let hashedPasswordToPass: string | undefined = undefined;
     if (!linkedUid && password) {
       try {
-        const { hashPassword } = await import('../src/utils/cryptoUtils');
-        hashedPasswordToPass = await hashPassword(password);
+        const { hashCandidatePassword } = await import('../src/services/employeeService');
+        hashedPasswordToPass = await hashCandidatePassword(password);
       } catch (err) {
         console.error("Failed to hash password on client", err);
       }

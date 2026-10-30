@@ -757,6 +757,17 @@ export const checkApplicantDuplicates = async (identifiers: {
     return res;
 };
 
+export const hashCandidatePassword = async (password: string): Promise<string> => {
+    try {
+        const hashFn = httpsCallable<{ password: string }, { passwordHash: string }>(functions, 'hashCandidatePasswordServer');
+        const res = await hashFn({ password });
+        return res.data?.passwordHash || '';
+    } catch (err: any) {
+        console.error("[hashCandidatePassword] Server-side password hashing error:", err);
+        throw err;
+    }
+};
+
 export const submitEmployeeForm = async (
     formData: any,
     originalFormSections: any[],
@@ -963,8 +974,7 @@ export const submitEmployeeForm = async (
                 submission.isDefaultPassword = false;
             } else {
                 const defaultRawPassword = generateDefaultPassword(employeeName, dobValue) || 'TEMP1234';
-                const { hashPassword } = await import('../utils/cryptoUtils');
-                submission.passwordHash = await hashPassword(defaultRawPassword);
+                submission.passwordHash = await hashCandidatePassword(defaultRawPassword);
                 submission.isDefaultPassword = true;
             }
         }
@@ -1875,8 +1885,7 @@ export const updateSubmissionStatus = async (
                     newEmployee.isDefaultPassword = data.isDefaultPassword || false;
                 } else {
                     const fallbackRaw = dynamicPassword || 'TEMP1234';
-                    const { hashPassword } = await import('../utils/cryptoUtils');
-                    newEmployee.passwordHash = await hashPassword(fallbackRaw);
+                    newEmployee.passwordHash = await hashCandidatePassword(fallbackRaw);
                     newEmployee.isDefaultPassword = true;
                 }
             }
