@@ -220,7 +220,6 @@ const AppRoutes: React.FC<AppRoutesProps> = (props) => {
                     } />
                     <Route path="/claim-profile" element={<ProfileClaimPage />} />
                     <Route path="/correct-details" element={<DataCorrectionPage sections={props.syncedSections} />} />
-                    <Route path="/correct details" element={<DataCorrectionPage sections={props.syncedSections} />} />
                     <Route path="/join" element={
                         <EmployeeFormPage
                             sections={props.syncedSections}
@@ -268,7 +267,6 @@ const AppRoutes: React.FC<AppRoutesProps> = (props) => {
                 <Route path="/employee/*" element={<RedirectToExternal url="https://employee.udfonline.in/dashboard" label="Employee Dashboard" />} />
                 <Route path="/claim-profile" element={<RedirectToExternal url="https://employee.udfonline.in/claim-profile" label="Profile Claim" />} />
                 <Route path="/correct-details" element={<RedirectToExternal url="https://employee.udfonline.in/correct-details" label="Data Correction" />} />
-                <Route path="/correct details" element={<RedirectToExternal url="https://employee.udfonline.in/correct-details" label="Data Correction" />} />
 
                 <Route path="/blogs" element={<BlogsPage />} />
                 <Route path="/blogs/:postId" element={<BlogsPage />} />

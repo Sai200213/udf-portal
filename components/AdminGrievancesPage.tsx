@@ -76,7 +76,9 @@ const AdminGrievancesPage: React.FC<AdminGrievancesPageProps> = ({
     const canViewInquiries = isSuperAdmin || hasPermission(Permission.MANAGE_SYSTEM) || hasPermission(Permission.GRIEVANCES_VIEW);
 
     const [activeTab, setActiveTab] = useState<'grievances' | 'rewards' | 'inquiries'>(() => {
-        if (!canViewGrievances && canViewRewards) return 'rewards';
+        if (canViewGrievances) return 'grievances';
+        if (canViewRewards) return 'rewards';
+        if (canViewInquiries) return 'inquiries';
         return 'grievances';
     });
 
