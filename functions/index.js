@@ -1659,7 +1659,9 @@ exports.adminControlEmployeeAuth = functions.https.onCall(async (request) => {
                         }
                     }
                 }
-                tempPassword = `${firstName}${year}`;
+                const phoneOrAadhaar = sourceData.phoneNumber || sourceData.aadhaarNumber || '';
+                const cleanSuffix = (phoneOrAadhaar || '').replace(/\D/g, '').slice(-4);
+                tempPassword = `${firstName}${year}${cleanSuffix ? '@' + cleanSuffix : ''}`;
             }
             
             const hashed = await hashPassword(tempPassword);
@@ -4923,6 +4925,24 @@ exports.approveOnboardingServer = functions.https.onCall(async (request) => {
     if (resolvedPasswordHash) {
         newEmployee.passwordHash = resolvedPasswordHash;
         newEmployee.isDefaultPassword = resolvedIsDefaultPassword;
+    } else if (newEmployee.authProvider === 'manual') {
+        const firstName = employeeName.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        let year = '123';
+        const dataObj = subData.formData || {};
+        for (const [key, val] of Object.entries(dataObj)) {
+            if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                const keyLower = key.toLowerCase();
+                if (keyLower.includes('birth') || keyLower.includes('dob')) {
+                    year = val.split('-')[0];
+                    break;
+                }
+            }
+        }
+        const phoneOrAadhaar = request.data.phoneNumber || subData.phoneNumber || request.data.aadhaarNumber || subData.aadhaarNumber || '';
+        const cleanSuffix = (phoneOrAadhaar || '').replace(/\D/g, '').slice(-4);
+        const serverDefaultPassword = `${firstName}${year}${cleanSuffix ? '@' + cleanSuffix : ''}`;
+        newEmployee.passwordHash = await hashPassword(serverDefaultPassword);
+        newEmployee.isDefaultPassword = true;
     }
 
     if (customRecruiter) {

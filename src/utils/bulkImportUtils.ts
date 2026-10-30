@@ -523,7 +523,7 @@ export const parseCSV = (csvString: string): BulkImportRow[] => {
  * Generate a dynamic default password based on name and DOB
  * Pattern: First Name (lowercase) + Year (YYYY)
  */
-export const generateDefaultPassword = (fullName: string, dobString?: string): string => {
+export const generateDefaultPassword = (fullName: string, dobString?: string, secretSuffix?: string): string => {
     const firstName = (fullName || 'user').split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
     let year = '123';
 
@@ -534,7 +534,8 @@ export const generateDefaultPassword = (fullName: string, dobString?: string): s
         }
     }
 
-    return `${firstName}${year}`;
+    const cleanSuffix = (secretSuffix || '').replace(/\D/g, '').slice(-4);
+    return `${firstName}${year}${cleanSuffix ? '@' + cleanSuffix : ''}`;
 };
 
 // Generate employee ID conforming to /^[A-Z]{2}\d{6}$/ (e.g. HY123456 or UD123456)
@@ -848,7 +849,8 @@ export const bulkImportEmployees = async (
                 }
             }
 
-            const defaultPasswordHash = await hashCandidatePassword(generateDefaultPassword(row.fullName, row.dateOfBirth));
+            const secretSuffix = row.phoneNumber || row.aadhaarNumber || '';
+            const defaultPasswordHash = await hashCandidatePassword(generateDefaultPassword(row.fullName, row.dateOfBirth, secretSuffix));
             const finalPasswordHash = existingEmpDoc?.passwordHash || defaultPasswordHash;
             const finalIsDefaultPassword = existingEmpDoc?.isDefaultPassword !== undefined ? existingEmpDoc.isDefaultPassword : true;
 

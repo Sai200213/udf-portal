@@ -42,7 +42,6 @@ import {
     approveEmployeeFolder
 } from './driveService';
 import { uploadSubmissionDocument, deleteStorageFolder, deleteStorageFile, moveStorageFiles, uploadEmployeeDocument, getSecureBlob } from './storageService';
-import { generateDefaultPassword } from '../utils/bulkImportUtils';
 import { logSystemAction } from './auditService';
 
 // Re-export for backward compatibility
@@ -973,8 +972,7 @@ export const submitEmployeeForm = async (
                 submission.passwordHash = selectedPasswordHash;
                 submission.isDefaultPassword = false;
             } else {
-                const defaultRawPassword = generateDefaultPassword(employeeName, dobValue) || 'TEMP1234';
-                submission.passwordHash = await hashCandidatePassword(defaultRawPassword);
+                submission.passwordHash = null;
                 submission.isDefaultPassword = true;
             }
         }
@@ -1778,11 +1776,6 @@ export const updateSubmissionStatus = async (
                 initialAssignment.subUnitId = data.formData.subUnitId;
             }
 
-            const dobField = data.originalFormSections.flatMap(s => s.fields || []).find(f => f.label?.toLowerCase().includes('birth'));
-            const dobValue = dobField ? data.formData[dobField.id] : undefined;
-            const dynamicPassword = generateDefaultPassword(employeeName, dobValue);
-            // NOTE: Password will be hashed server-side with bcrypt on first login (Cloud Function auto-upgrade)
-
             // ============================================================
             // STORAGE-APPROVAL: Move files from Onboarding to Employee folder
             // Dynamically inspect formData paths to find the exact source folder
@@ -1884,8 +1877,7 @@ export const updateSubmissionStatus = async (
                     newEmployee.passwordHash = data.passwordHash;
                     newEmployee.isDefaultPassword = data.isDefaultPassword || false;
                 } else {
-                    const fallbackRaw = dynamicPassword || 'TEMP1234';
-                    newEmployee.passwordHash = await hashCandidatePassword(fallbackRaw);
+                    newEmployee.passwordHash = null;
                     newEmployee.isDefaultPassword = true;
                 }
             }
