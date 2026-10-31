@@ -5174,24 +5174,13 @@ export const submitCorrectionResponse = async (
         }
     }
     
-    // Perform update via secure Cloud Function (Admin SDK) to bypass client security rule blocks
+    // Perform update via secure Cloud Function (Admin SDK) to ensure server validation and audit trail (Finding 4)
     try {
         await submitCorrectionServerClient(requestId, sessionToken || '', processedData);
         log.log(`[submitCorrectionResponse] Successfully processed correction via submitCorrectionServerClient for ${requestId}`);
     } catch (srvErr) {
-        log.warn("[submitCorrectionResponse] Server call failed, attempting direct update fallback:", srvErr);
-        // Direct Firestore fallback for authorized admin / owner sessions
-        try {
-            const cleanUpdates = JSON.parse(JSON.stringify(updates));
-            await updateDoc(targetRef, cleanUpdates);
-            await updateDoc(requestRef, {
-                status: 'completed',
-                completedAt: new Date().toISOString()
-            });
-        } catch (clientErr) {
-            log.error("[submitCorrectionResponse] Direct client fallback update failed:", clientErr);
-            throw srvErr;
-        }
+        log.error("[submitCorrectionResponse] Server-side correction submission failed:", srvErr);
+        throw srvErr;
     }
 };
 
@@ -5278,8 +5267,8 @@ export const getReferralInvite = async (refId: string): Promise<ReferralInvite |
 export const incrementReferralClicks = async (refId: string) => {
     if (!refId) return;
     try {
-        const docRef = doc(db, 'referral_invites', refId);
-        await updateDoc(docRef, { clicks: increment(1) });
+        const recordFn = httpsCallable<{ refId: string; metric: string }, { success: boolean }>(functions, 'recordReferralMetricServer');
+        await recordFn({ refId, metric: 'clicks' });
     } catch (e) {
         console.error("Failed to increment referral clicks:", e);
     }
@@ -5288,11 +5277,8 @@ export const incrementReferralClicks = async (refId: string) => {
 export const incrementReferralStarts = async (refId: string) => {
     if (!refId) return;
     try {
-        const docRef = doc(db, 'referral_invites', refId);
-        await updateDoc(docRef, { 
-            started: increment(1), 
-            starts: increment(1) 
-        });
+        const recordFn = httpsCallable<{ refId: string; metric: string }, { success: boolean }>(functions, 'recordReferralMetricServer');
+        await recordFn({ refId, metric: 'starts' });
     } catch (e) {
         console.error("Failed to increment referral starts:", e);
     }
@@ -5301,8 +5287,8 @@ export const incrementReferralStarts = async (refId: string) => {
 export const incrementReferralJoined = async (refId: string) => {
     if (!refId) return;
     try {
-        const docRef = doc(db, 'referral_invites', refId);
-        await updateDoc(docRef, { joined: increment(1) });
+        const recordFn = httpsCallable<{ refId: string; metric: string }, { success: boolean }>(functions, 'recordReferralMetricServer');
+        await recordFn({ refId, metric: 'joined' });
     } catch (e) {
         console.error("Failed to increment referral joined:", e);
     }

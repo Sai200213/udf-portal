@@ -187,9 +187,6 @@ service cloud.firestore {
         resource.data.get('linkedUid', '') == request.auth.uid
       ));
       allow update: if canAdminManageEmployees() 
-        || (hasActiveCorrectionToken(resource.data) &&
-            request.resource.data.activeCorrectionToken == null &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileData', 'data', 'lastUpdated', 'activeCorrectionToken', 'panNumber', 'aadhaarNumber', 'uanNumber', 'phoneNumber']))
         || (isAuthenticated() && (request.auth.uid == userId || resource.data.get('uid', '') == request.auth.uid) && (
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['profileStatus', 'lastUpdated', 'needsProfileCompletion', 'profilePhotoURL']) &&
@@ -226,9 +223,6 @@ service cloud.firestore {
       ));
       allow create: if isAuthenticated();
       allow update: if canAdminManageEmployees() 
-        || (hasActiveCorrectionToken(resource.data) &&
-            request.resource.data.activeCorrectionToken == null &&
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['formData', 'data', 'profileData', 'lastUpdated', 'activeCorrectionToken', 'panNumber', 'aadhaarNumber', 'uanNumber', 'phoneNumber', 'applicantName', 'driveFolderName', 'duplicateCheck']))
         || (isAuthenticated() && (resource.id == request.auth.uid || resource.data.uid == request.auth.uid || resource.data.linkedUid == request.auth.uid));
       allow delete: if canAdminDeleteEmployees(); 
     }
@@ -458,10 +452,7 @@ service cloud.firestore {
       allow get: if true; // Publicly readable for validation/checks on form load
       allow create: if isSuperAdmin() || hasPermission('INVITES_CREATE');
       allow update: if (
-        // Allow anyone to update clicks, started, starts, joined counts
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clicks', 'started', 'starts', 'joined'])
-      ) || (
-        // Admin override
+        // Admin override (referral clicks, starts & joins are tracked exclusively server-side)
         isSuperAdmin() || hasPermission('INVITES_MANAGE')
       ) || (
         // Creator-specific checks

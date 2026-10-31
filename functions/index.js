@@ -2993,9 +2993,41 @@ exports.getSystemMetrics = functions.https.onCall(async (request) => {
     }
 });
 
-// Secure check for employee status during Forgot Password flow (so we don't need client-side read permission)
+// Shared IP rate limiting for public unauthenticated lookup endpoints (max 10 requests per minute per IP)
+const lookupRateLimits = new Map();
+
+function checkLookupRateLimit(ip) {
+    const now = Date.now();
+    const windowMs = 60 * 1000; // 1 minute
+    const maxAttempts = 10;
+
+    let record = lookupRateLimits.get(ip);
+    if (!record || now - record.startTime > windowMs) {
+        record = { count: 1, startTime: now };
+        lookupRateLimits.set(ip, record);
+        return true;
+    }
+
+    if (record.count >= maxAttempts) {
+        return false;
+    }
+
+    record.count++;
+    return true;
+}
+
+// Secure check for employee status during Forgot Password flow with IP rate-limiting (Finding 3)
 exports.checkForgotPasswordEmployeeStatus = functions.https.onCall(async (request) => {
-    const { employeeId } = request.data;
+    const rawReq = request.rawRequest;
+    const clientIp = (rawReq && (rawReq.headers['x-forwarded-for'] || rawReq.ip || rawReq.connection?.remoteAddress)) || 'unknown-client';
+    const cleanIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : 'unknown-client';
+
+    if (!checkLookupRateLimit(cleanIp)) {
+        console.warn(`[checkForgotPasswordEmployeeStatus] Rate limit exceeded for IP: ${cleanIp}`);
+        throw new functions.https.HttpsError('resource-exhausted', 'Too many lookup requests. Please wait a minute before trying again.');
+    }
+
+    const { employeeId } = request.data || {};
     if (!employeeId) {
         throw new functions.https.HttpsError('invalid-argument', 'Missing employeeId');
     }
@@ -3031,28 +3063,7 @@ exports.checkForgotPasswordEmployeeStatus = functions.https.onCall(async (reques
     }
 });
 
-// Rate limiting for username lookups: max 10 requests per minute per IP
-const lookupRateLimits = new Map();
 
-function checkLookupRateLimit(ip) {
-    const now = Date.now();
-    const windowMs = 60 * 1000; // 1 minute
-    const maxAttempts = 10;
-
-    let record = lookupRateLimits.get(ip);
-    if (!record || now - record.startTime > windowMs) {
-        record = { count: 1, startTime: now };
-        lookupRateLimits.set(ip, record);
-        return true;
-    }
-
-    if (record.count >= maxAttempts) {
-        return false;
-    }
-
-    record.count++;
-    return true;
-}
 
 exports.resolveUsernameToEmail = functions.https.onCall(async (request) => {
     const rawReq = request.rawRequest;
@@ -3168,6 +3179,54 @@ exports.resolveUsernameToEmail = functions.https.onCall(async (request) => {
         }
         console.error('Error in resolveUsernameToEmail:', error);
         throw new functions.https.HttpsError('internal', 'Internal error resolving username.');
+    }
+});
+
+
+// Secure server-side referral counter increments with IP rate-limiting (Finding 2)
+exports.recordReferralMetricServer = functions.https.onCall(async (request) => {
+    const { refId, metric } = request.data || {};
+    if (!refId || typeof refId !== 'string' || !metric || typeof metric !== 'string') {
+        throw new functions.https.HttpsError('invalid-argument', 'Missing refId or metric.');
+    }
+
+    const allowedMetrics = ['clicks', 'starts', 'joined'];
+    if (!allowedMetrics.includes(metric)) {
+        throw new functions.https.HttpsError('invalid-argument', 'Invalid referral metric.');
+    }
+
+    const rawReq = request.rawRequest;
+    const clientIp = (rawReq && (rawReq.headers['x-forwarded-for'] || rawReq.ip || rawReq.connection?.remoteAddress)) || 'unknown-client';
+    const cleanIp = typeof clientIp === 'string' ? clientIp.split(',')[0].trim() : 'unknown-client';
+
+    if (!checkLookupRateLimit(cleanIp)) {
+        throw new functions.https.HttpsError('resource-exhausted', 'Rate limit exceeded. Please wait a moment.');
+    }
+
+    try {
+        const db = admin.firestore();
+        const docRef = db.collection('referral_invites').doc(refId.trim());
+        const docSnap = await docRef.get();
+        if (!docSnap.exists) {
+            throw new functions.https.HttpsError('not-found', 'Referral invite not found.');
+        }
+
+        let updateData = {};
+        if (metric === 'clicks') {
+            updateData.clicks = admin.firestore.FieldValue.increment(1);
+        } else if (metric === 'starts') {
+            updateData.starts = admin.firestore.FieldValue.increment(1);
+            updateData.started = admin.firestore.FieldValue.increment(1);
+        } else if (metric === 'joined') {
+            updateData.joined = admin.firestore.FieldValue.increment(1);
+        }
+
+        await docRef.update(updateData);
+        return { success: true };
+    } catch (error) {
+        if (error instanceof functions.https.HttpsError) throw error;
+        console.error('[recordReferralMetricServer] Error:', error);
+        throw new functions.https.HttpsError('internal', 'Failed to update referral metric.');
     }
 });
 
@@ -4126,27 +4185,69 @@ exports.submitCorrectionServer = functions.https.onCall(async (request) => {
         }
     }
 
-    // Sync top-level identifiers if modified
+    // Sync top-level identifiers if modified, enforcing strict server-side validation (Finding 4)
     for (const [fieldKey, fieldVal] of Object.entries(processedData)) {
         const strVal = typeof fieldVal === 'string' ? fieldVal.trim() : (fieldVal?.value || '');
         if (!strVal) continue;
         const keyLower = fieldKey.toLowerCase();
-        if (/pan/i.test(keyLower) || fieldKey === 'da8edb18-4bed-41ca-8233-2280b97dac8d') updates.panNumber = strVal.toUpperCase();
-        if (/aadhaar|aadhar/i.test(keyLower) || fieldKey === '18855ee9-0d66-41d6-988b-128b776a8c5b') updates.aadhaarNumber = strVal;
-        if (/uan/i.test(keyLower) || fieldKey === 'f6665f3e-98f4-4d92-8b53-adcaa1993bbe') updates.uanNumber = strVal;
-        if (/phone|mobile|contact/i.test(keyLower) || fieldKey === 'eb3617dc-9f1d-475d-a2db-005b6bc2500c') updates.phoneNumber = strVal;
-        if (/name|applicant_?name/i.test(keyLower) && !/father|mother|spouse|reference|bank/i.test(keyLower)) updates.applicantName = strVal;
+        if (/pan/i.test(keyLower) || fieldKey === 'da8edb18-4bed-41ca-8233-2280b97dac8d') {
+            const cleanPan = strVal.toUpperCase();
+            if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(cleanPan)) {
+                throw new functions.https.HttpsError('invalid-argument', 'Invalid PAN format. Must be 10 characters (e.g. ABCDE1234F).');
+            }
+            updates.panNumber = cleanPan;
+        }
+        if (/aadhaar|aadhar/i.test(keyLower) || fieldKey === '18855ee9-0d66-41d6-988b-128b776a8c5b') {
+            const cleanAadhaar = strVal.replace(/\D/g, '');
+            if (cleanAadhaar.length !== 12) {
+                throw new functions.https.HttpsError('invalid-argument', 'Invalid Aadhaar format. Must be 12 digits.');
+            }
+            updates.aadhaarNumber = cleanAadhaar;
+        }
+        if (/uan/i.test(keyLower) || fieldKey === 'f6665f3e-98f4-4d92-8b53-adcaa1993bbe') {
+            const cleanUan = strVal.replace(/\D/g, '');
+            if (cleanUan.length !== 12) {
+                throw new functions.https.HttpsError('invalid-argument', 'Invalid UAN format. Must be 12 digits.');
+            }
+            updates.uanNumber = cleanUan;
+        }
+        if (/phone|mobile|contact/i.test(keyLower) || fieldKey === 'eb3617dc-9f1d-475d-a2db-005b6bc2500c') {
+            const cleanPhone = strVal.replace(/\D/g, '').slice(-10);
+            if (cleanPhone.length !== 10) {
+                throw new functions.https.HttpsError('invalid-argument', 'Invalid mobile phone number. Must be 10 digits.');
+            }
+            updates.phoneNumber = cleanPhone;
+        }
+        if (/name|applicant_?name/i.test(keyLower) && !/father|mother|spouse|reference|bank/i.test(keyLower)) {
+            updates.applicantName = strVal;
+        }
     }
 
-    // Update target document
-    await targetRef.update(updates);
-
-    // Mark correction request completed
-    await docRef.update({
+    // Atomic batch commit for target document update, request completion, and audit trail
+    const batch = db.batch();
+    batch.update(targetRef, updates);
+    batch.update(docRef, {
         status: 'completed',
         completedAt: new Date().toISOString(),
         submittedUpdates: processedData
     });
+
+    const auditRef = db.collection('audit_logs').doc();
+    batch.set(auditRef, {
+        action: 'UPDATE',
+        category: 'EMPLOYEES',
+        description: `Data correction completed for ${reqData.targetType} ${reqData.targetId} via token ${cleanToken}`,
+        targetId: reqData.targetId,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        performedBy: 'DATA_CORRECTION_SESSION',
+        metadata: {
+            requestId: cleanToken,
+            targetType: reqData.targetType,
+            modifiedFields: Object.keys(processedData)
+        }
+    });
+
+    await batch.commit();
 
     console.log(`[submitCorrectionServer] Successfully processed correction ${cleanToken} for ${reqData.targetId}`);
     return { success: true };
